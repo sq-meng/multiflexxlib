@@ -13,5 +13,6 @@ setup(name='multiflexxlib',
       author_email='mengsq04@gmail.com',
       license='',
       packages=['multiflexxlib'],
+      install_requires=requires,
       zip_safe=False,
       include_package_data=True)
