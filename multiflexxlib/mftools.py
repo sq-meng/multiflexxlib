@@ -37,7 +37,7 @@ try:
     INTENSITY_COEFFICIENT = np.loadtxt(pkg_resources.resource_filename(__name__, 'res/int_corr.csv'), delimiter=',')
 except IOError:
     print('Intensity correction matrix not found - assuming all ones.')
-    INTENSITY_COEFFICIENT = np.ones([NUM_CHANNELS, 1])
+    INTENSITY_COEFFICIENT = np.ones(NUM_CHANNELS)
 
 
 def nan_float(string):
