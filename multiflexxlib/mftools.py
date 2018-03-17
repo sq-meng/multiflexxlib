@@ -309,13 +309,13 @@ def bin_locus(locus_list):
     return merged_locus
 
 
-def bin_scan_points(data_frames):
+def bin_scan_points(data_frames, angle_tolerance=0.2):
     joined_frames = pd.concat(data_frames, axis=0, ignore_index=True)
     joined_frames = joined_frames.assign(counts_norm=joined_frames.counts/joined_frames.coeff)
     joined_frames = joined_frames.drop(joined_frames[joined_frames.valid != 1].index)  # delete dead detectors
 
-    a3_cuts = bin_and_cut(joined_frames.A3)
-    a4_cuts = bin_and_cut(joined_frames.A4)
+    a3_cuts = bin_and_cut(joined_frames.A3, tolerance=angle_tolerance)
+    a4_cuts = bin_and_cut(joined_frames.A4, tolerance=angle_tolerance)
     group = joined_frames.groupby([a3_cuts, a4_cuts])
     sums = group['counts', 'counts_norm', 'MON'].sum()
     means = group['A3', 'A4', 'px', 'py', 'pz'].mean()
@@ -339,7 +339,7 @@ def series_to_binder(items: pd.Series):
 
 
 def bin_scans(list_of_data: List['Scan'], nan_fill=0, ignore_ef=False,
-              en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05) -> 'BinnedData':
+              en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, angle_tolerance=0.2) -> 'BinnedData':
     all_data = pd.DataFrame(index=range(len(list_of_data) * len(EF_LIST)),
                             columns=['name', 'ei', 'ef', 'en', 'tt', 'mag', 'points', 'locus_a', 'locus_p'])
     file_names = [data.file_name for data in list_of_data]
@@ -393,12 +393,13 @@ def read_mf_scans(filename_list: List[str]=None, ub_matrix=None, intensity_matri
 
 
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
-                 en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05):
+                 en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, angle_tolerance=0.2):
     if filename_list is None:
         path = ask_directory('Folder containing data')
         filename_list = list_flexx_files(path)
     items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
-    df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance)
+    df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance,
+                   angle_tolerance=angle_tolerance)
     return df
 
 
@@ -770,6 +771,7 @@ def ask_directory(title='Choose a folder'):
     root = tkinter.Tk()
     root.withdraw()
     path = filedialog.askdirectory(initialdir='.', title=title)
+    root.destroy()
     return path
 
 
