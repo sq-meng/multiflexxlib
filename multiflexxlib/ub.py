@@ -3,14 +3,27 @@ from fractions import Fraction
 
 
 def etok(e_mev):
+    """
+    Converts meV to wavevector Angstrom^-1.
+    :param e_mev: energy in meV.
+    :return: Wavevector in Angstrom^-1.
+    """
     return np.sqrt(e_mev) * 0.6947
 
 
 def ktoe(k_inv_angstrom):
+    """
+    Does the opposite or etok.
+    :param k_inv_angstrom: A-1.
+    :return: meV.
+    """
     return (k_inv_angstrom / 0.6947) ** 2
 
 
 class UBMatrix(object):
+    """
+    UB-matrix handling object. Can be compared to each other using == operator to check if all settings are identical.
+    """
     def __init__(self, latparam, hkl1, hkl2, plot_x=None, plot_y=None):
         self._latparam = latparam
         self._hkl1 = hkl1
@@ -148,6 +161,8 @@ class UBMatrix(object):
         return self.__copy__()
 
     def __eq__(self, other: 'UBMatrix'):
+        if not isinstance(other, UBMatrix):
+            raise TypeError('UBMatrix can only be checked for equality with another UBMatrix.')
         latparam_eq = np.all(self.latparam == other.latparam)
         hkl_eq = np.all(self.hkl1 == other.hkl1) and np.all(self.hkl2 == other.hkl2)
         plot_eq = np.all(self.plot_x == other.plot_x) and np.all(self.plot_y == other.plot_y)

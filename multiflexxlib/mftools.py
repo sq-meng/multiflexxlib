@@ -40,7 +40,7 @@ except IOError:
     INTENSITY_COEFFICIENT = np.ones(NUM_CHANNELS)
 
 
-def nan_float(string):
+def _nan_float(string):
     try:
         return float(string)
     except ValueError:
@@ -50,7 +50,7 @@ def nan_float(string):
             raise
 
 
-def nan_int(string):
+def _nan_int(string):
     try:
         return int(string)
     except ValueError:
@@ -61,7 +61,7 @@ def nan_int(string):
 
 
 def _parse_flatcone_line(line):
-    data = np.array([nan_int(x) for x in line.split()])
+    data = np.array([_nan_int(x) for x in line.split()])
     array = np.reshape(data, (-1, len(EF_LIST)))[0: -1, :]  # throws out last line which is only artifact
     ang_channels = np.array([np.arange(1, NUM_CHANNELS + 1)]).T  # starts at 1 to match stickers
     array_with_ch_no = np.hstack([ang_channels, array])
@@ -84,7 +84,7 @@ def _parse_param_line(line):
         for eq in equations:
             param_name, value_raw = [x.strip() for x in eq.split('=')]
             try:
-                value = nan_float(value_raw)
+                value = _nan_float(value_raw)
             except ValueError:
                 value = value_raw
             line_dict[param_name] = value
@@ -92,6 +92,12 @@ def _parse_param_line(line):
 
 
 def parse_ill_data(file_object, start_flag='DATA_:\n'):
+    """
+    Parses ILL TASMAD scan files.
+    :param file_object: Handle to opened file or stream.
+    :param start_flag: Start flag of data section. Omit for default.
+    :return: (header_dict, dataframe)
+    """
     # first parse headers
     try:
         file_object.seek(0, 0)
@@ -111,7 +117,7 @@ def parse_ill_data(file_object, start_flag='DATA_:\n'):
     column_names = data_section.splitlines()[0].split()
     # line only w 0-9, . -, spc, tab
     parameters_text_lines = re.findall('^[0-9*\-\s\t.]+?$', data_section, re.MULTILINE)
-    parameters_value_array = np.array([[nan_float(num) for num in line.split()] for line in parameters_text_lines])
+    parameters_value_array = np.array([[_nan_float(num) for num in line.split()] for line in parameters_text_lines])
     data_frame = pd.DataFrame(data=parameters_value_array, columns=column_names)
     data_frame['PNT'] = data_frame['PNT'].astype('int16')
     df_clean = data_frame.T.drop_duplicates().T
@@ -135,8 +141,15 @@ def parse_ill_data(file_object, start_flag='DATA_:\n'):
     return dict(header_dict), df_clean
 
 
-def ub_from_header(header_dict):
-    param = header_dict['PARAM']
+def ub_from_header(scan_header: ('Scan', dict)):
+    """
+    Make a UBMatrix object from TASMAD scan header.
+    :param scan_header:
+    :return:
+    """
+    if isinstance(scan_header, Scan):
+        scan_header = scan_header.header
+    param = scan_header['PARAM']
     lattice_parameters = [param['AS'], param['BS'], param['CS'], param['AA'], param['BB'], param['CC']]
     hkl1 = [float(param['AX']), float(param['AY']), float(param['AZ'])]
     hkl2 = [float(param['BX']), float(param['BY']), float(param['BZ'])]
@@ -145,7 +158,17 @@ def ub_from_header(header_dict):
 
 
 class Scan(object):
+    """
+    Reads a TASMAD scan file, extracts metadata and do essential conversions. Assumes const-Ei scan!
+    Should not be instantiated by directly invoking constructor. Use read_mf_scan() or read_mf_scans() instead.
+    """
     def __init__(self, file_name, ub_matrix=None, intensity_matrix=None):
+        """
+        Scan object.
+        :param file_name: File name of TASMAD scan file.
+        :param ub_matrix: UBMatrix object to be used. Omit to generate from file header.
+        :param intensity_matrix: Intensity correction matrix to be used. Omit to use default.
+        """
         f = open(file_name)
         self.header, self.data = parse_ill_data(f)
         self.file_name = os.path.abspath(file_name)
@@ -153,7 +176,8 @@ class Scan(object):
             raise AttributeError('%s does not contain flatcone data.' % file_name)
         elif 'A3' not in self.header['STEPS'].keys():
             raise AttributeError('%s is not A3 scan.' % file_name)
-
+        elif 'EI' in self.header['STEPS'].keys():
+            raise AttributeError('%s is not a const-E scan.' % file_name)
         if intensity_matrix:
             self.intensity_matrix = intensity_matrix
         else:
@@ -201,6 +225,10 @@ class Scan(object):
     @property
     def np_actual(self):
         return len(self.data)
+
+    @property
+    def scan_number(self):
+        return os.path.split(self.file_name)[1]
 
     def _update_locus(self):
         self.planned_locus_list = []
@@ -275,9 +303,9 @@ class Scan(object):
         pass
 
 
-def chasm_bins(values, tolerance=0.2) -> list:
+def _make_bin_edges(values, tolerance=0.2) -> list:
     """
-    :param values: An iterable list of all angles, repetitions allowed.
+    :param values: An iterable list of all physical quantities, repetitions allowed.
     :param tolerance: maximum difference in value for considering two points to be the same.
     :return: a list of bin edges
 
@@ -300,7 +328,7 @@ def chasm_bins(values, tolerance=0.2) -> list:
     return bin_edges
 
 
-def bin_locus(locus_list):
+def _bin_locus(locus_list):
     clipper = pyclipper.Pyclipper()
     for locus in locus_list:
         clipper.AddPath(pyclipper.scale_to_clipper(locus), pyclipper.PT_SUBJECT)
@@ -309,7 +337,13 @@ def bin_locus(locus_list):
     return merged_locus
 
 
-def bin_scan_points(data_frames, angle_tolerance=0.2):
+def _bin_scan_points(data_frames, angle_tolerance=0.2):
+    """
+    Bins actual detector counts together from multiple runs.
+    :param data_frames: Pandas data frames from Scan objects.
+    :param angle_tolerance: Max angle difference before two angles are considered discreet.
+    :return: An intermediate data structure even I don't really remember.
+    """
     joined_frames = pd.concat(data_frames, axis=0, ignore_index=True)
     joined_frames = joined_frames.assign(counts_norm=joined_frames.counts/joined_frames.coeff)
     joined_frames = joined_frames.drop(joined_frames[joined_frames.valid != 1].index)  # delete dead detectors
@@ -329,17 +363,28 @@ def bin_scan_points(data_frames, angle_tolerance=0.2):
 
 
 def bin_and_cut(data: pd.Series, tolerance=0.2):
-    bin_edges = chasm_bins(data, tolerance)
+    bin_edges = _make_bin_edges(data, tolerance)
     cut = pd.cut(data, bin_edges)
     return cut
 
 
 def series_to_binder(items: pd.Series):
-    return DataBinder(list(items))
+    return _DataBinder(list(items))
 
 
 def bin_scans(list_of_data: List['Scan'], nan_fill=0, ignore_ef=False,
               en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, angle_tolerance=0.2) -> 'BinnedData':
+    """
+    Bin raw Scan objects into BinnedData object.
+    :param list_of_data: a list of Scan objects.
+    :param nan_fill: how to deal NaNs in metadata such as temperature. Default is fill 0.
+    :param ignore_ef: Not implemented.
+    :param en_tolerance: Energy binning tolerance.
+    :param tt_tolerance: Temperature binning tolerance.
+    :param mag_tolerance: Magnetic field binning tolerance.
+    :param angle_tolerance: Angle binning tolerance of data points.
+    :return: BinnedData object.
+    """
     all_data = pd.DataFrame(index=range(len(list_of_data) * len(EF_LIST)),
                             columns=['name', 'ei', 'ef', 'en', 'tt', 'mag', 'points', 'locus_a', 'locus_p'])
     file_names = [data.file_name for data in list_of_data]
@@ -361,21 +406,36 @@ def bin_scans(list_of_data: List['Scan'], nan_fill=0, ignore_ef=False,
     else:
         grouped = all_data.groupby([cut_ei, cut_en, cut_tt, cut_mag])
     grouped_meta = grouped['ei', 'ef', 'en', 'tt', 'mag'].mean()
-    grouped_data = grouped['points'].apply(series_to_binder).apply(MergedDataPoints)
+    grouped_data = grouped['points'].apply(series_to_binder).apply(_MergedDataPoints)
 
-    grouped_locus_a = grouped['locus_a'].apply(series_to_binder).apply(MergedLocus)
-    grouped_locus_p = grouped['locus_p'].apply(series_to_binder).apply(MergedLocus)
+    grouped_locus_a = grouped['locus_a'].apply(series_to_binder).apply(_MergedLocus)
+    grouped_locus_p = grouped['locus_p'].apply(series_to_binder).apply(_MergedLocus)
     joined = pd.concat([grouped_meta, grouped_data, grouped_locus_a, grouped_locus_p], axis=1)
     index_reset = joined.dropna().reset_index(drop=True)
     return BinnedData(index_reset, file_names=file_names, ub_matrix=list_of_data[0].ub_matrix)
 
 
 def read_mf_scan(filename: str, ub_matrix=None, intensity_matrix=None) -> 'Scan':
+    """
+    Reads TASMAD scan files.
+    :param filename: TASMAD file name to read.
+    :param ub_matrix: UBMatrix to be used. Omit to generate automatically.
+    :param intensity_matrix: Int. matrix to use. Omit to use default.
+    :return: Scan object
+    """
     scan_object = Scan(filename, ub_matrix, intensity_matrix)
     return scan_object
 
 
 def read_mf_scans(filename_list: List[str]=None, ub_matrix=None, intensity_matrix=None, processes=1) -> List['Scan']:
+    """
+    Reads TASMAD scan files.
+    :param filename_list: A list of TASMAD file names to read. User will be prompted for a folder if omitted.
+    :param ub_matrix: UBMatrix to be used. Omit to generate automatically.
+    :param intensity_matrix: Int. matrix to use. Omit to use default.
+    :param processes: Number of processes.
+    :return: A list containing resulting Scan objects.
+    """
     if filename_list is None:
         path = ask_directory('Folder containing data')
         filename_list = list_flexx_files(path)
@@ -394,24 +454,40 @@ def read_mf_scans(filename_list: List[str]=None, ub_matrix=None, intensity_matri
 
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
                  en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, angle_tolerance=0.2):
-    if filename_list is None:
-        path = ask_directory('Folder containing data')
-        filename_list = list_flexx_files(path)
+    """
+    Reads and bins MultiFLEXX scan files together.
+    :param filename_list: A list containing absolute or relative paths of TASMAD scan files to read. User will be
+    prompted to choose a directory if omitted.
+    :param ub_matrix: UBMatrix object to be used. Omit to generate from data headers.
+    :param intensity_matrix: Intensity correction matrix to be used. Omit to use the default one.
+    :param processes: Number of processes to use.
+    :param en_tolerance: Energy tolerance before two values are considered discrete, default to 0.05meV.
+    :param tt_tolerance: Temperature tolerance, default to 1.0K.
+    :param mag_tolerance: Magnetic field tolerance, default to 0.05T.
+    :param angle_tolerance: A3 and A4 angle tolerance, default is 0.2deg.
+    :return: BinnedData object.
+    """
     items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
     df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance,
                    angle_tolerance=angle_tolerance)
     return df
 
 
-class DataBinder(list):
+class _DataBinder(list):
+    """
+    Helper class to override printing behaviour.
+    """
     def __str__(self):
         return '%d items' % len(self)
 
 
-class MergedLocus(list):
-    def __init__(self, items: DataBinder):
-        binned_locus = bin_locus(items)
-        super(MergedLocus, self).__init__(binned_locus)
+class _MergedLocus(list):
+    """
+    Helper class to override printing behaviour.
+    """
+    def __init__(self, items: _DataBinder):
+        binned_locus = _bin_locus(items)
+        super(_MergedLocus, self).__init__(binned_locus)
 
     def __str__(self):
         patches = len(self)
@@ -419,10 +495,11 @@ class MergedLocus(list):
         return '%dp %dv' % (patches, total_vertices)
 
 
-class MergedDataPoints(pd.DataFrame):
-    def __init__(self, items: DataBinder):
-        binned_points = bin_scan_points(items)
-        super(MergedDataPoints, self).__init__(binned_points)
+class _MergedDataPoints(pd.DataFrame):
+    # Helper class to override printing behaviour.
+    def __init__(self, items: _DataBinder):
+        binned_points = _bin_scan_points(items)
+        super(_MergedDataPoints, self).__init__(binned_points)
 
     def __str__(self):
         return '%d pts' % len(self)
@@ -449,12 +526,12 @@ class BinnedData(object):
             list_of_lop.append(lop)
         self.data = self.data.assign(voro=list_of_lop)
 
-    def cut(self, start, end, select=None, precision=2, labels=None, monitor=True):
+    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
         :param end: ending point in r.l.u., vector.
-        :param select: a list of indices to cut. Omit to cut all available data.
+        :param subset: a list of indices to cut. Omit to cut all available data.
         :param precision: refer to make_label method.
         :param labels: refer to make_label method.
         :param monitor: if normalize by monitor count.
@@ -463,11 +540,11 @@ class BinnedData(object):
         start_p = self.ub_matrix.convert(start, 'rp')[0:2]
         end_p = self.ub_matrix.convert(end, 'rp')[0:2]
         seg = np.vstack([start_p, end_p])
-        if select is None:
-            select = self.data.index
+        if subset is None:
+            subset = self.data.index
         cut_results = []
         point_indices = []
-        for index in select:
+        for index in subset:
             df = self.data.loc[index, 'points']
             voro = self.data.loc[index, 'voro']
             included = voronoi_plot.segment_intersect_polygons(seg, voro)
@@ -482,14 +559,14 @@ class BinnedData(object):
             percentiles = voronoi_plot.projection_on_segment(np.array(points), seg, self.ub_matrix.figure_aspect)
             result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr}).sort_values(by='x')
             cut_results.append(result)
-        cut_object = ConstECut(cut_results, point_indices, self, select, start, end)
+        cut_object = ConstECut(cut_results, point_indices, self, subset, start, end)
         self.last_cut = cut_object
         cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def cut_bins(self, start, end, select=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None):
-        if select is None:
-            select = self.data.index
+    def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None):
+        if subset is None:
+            subset = self.data.index
         if xtol is not None and ytol is not None:
             raise ValueError('Only either of ytol or np should be supplied.')
         start_s = self.ub_matrix.convert(start, 'rs')
@@ -514,7 +591,7 @@ class BinnedData(object):
             ytol = xtol
         cut_results = []
         point_indices = []
-        for index in select:
+        for index in subset:
             frame = self.data.loc[index, 'points']
             points_s = self.ub_matrix.convert(np.array(frame.loc[:, ['px', 'py', 'pz']]), 'ps', axis=1)
             pd_cut = _binning_1d_cut(start_s, end_s, points_s, xtol, ytol)
@@ -533,12 +610,12 @@ class BinnedData(object):
             indices = pd_cut[0].dropna().index.intersection(pd_cut[1].dropna().index)
             cut_results.append(cut_result)
             point_indices.append(indices)
-        cut_object = ConstECut(cut_results, point_indices, self, select, start, end)
+        cut_object = ConstECut(cut_results, point_indices, self, subset, start, end)
         cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
     def plot(self, select=None, columns=None, aspect=None):
-        plot_object = Plot2D(data_object=self, select=select, cols=columns, aspect=aspect)
+        plot_object = Plot2D(data_object=self, subset=select, cols=columns, aspect=aspect)
         self.last_plot = plot_object
         return plot_object
 
@@ -649,15 +726,18 @@ class ConstECut(object):
 
 
 class Plot2D(object):
-    def __init__(self, data_object: BinnedData, select=None, cols=None, aspect=None):
-        if select is None:
-            select = data_object.data.index
+    """
+    2D const-E plots. Should not be instantiated by invoking its constructor.
+    """
+    def __init__(self, data_object: BinnedData, subset=None, cols=None, aspect=None):
+        if subset is None:
+            subset = data_object.data.index
         self.data_object = data_object
-        rows, cols = _calc_figure_dimension(len(select), cols)
+        rows, cols = _calc_figure_dimension(len(subset), cols)
         self.f, axes = _init_plot_figure(rows, cols)
         self.axes = axes.reshape(-1)
         self.patches = None
-        self.indices = select
+        self.indices = subset
         self.aspect = aspect
         self.__plot__()
 
@@ -674,7 +754,7 @@ class Plot2D(object):
             record = self.data_object.data.loc[index, :]
             _draw_locus_outline(ax, record.locus_p)
             legend_str = self.data_object.make_label(index, multiline=True)
-            self.write_label(ax, legend_str)
+            self._write_label(ax, legend_str)
             values = record.points.permon / record.points.permon.max()
             v_fill = voronoi_plot.draw_patches(record.voro, values)
             coverage_patch = _draw_coverage_patch(ax, record.locus_a)
@@ -694,16 +774,26 @@ class Plot2D(object):
     def to_eps(self):
         pass
 
-    def cut(self, start, end, select=None, precision=2, labels=None, monitor=True):
-        if select is None:
-            select = self.indices
+    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True):
+        """
+        1D-cut through specified start and end points.
+        :param start: starting point in r.l.u., vector.
+        :param end: ending point in r.l.u., vector.
+        :param subset: a list of indices to cut. Omit to cut all available data.
+        :param precision: refer to make_label method.
+        :param labels: refer to make_label method.
+        :param monitor: if normalize by monitor count.
+        :return: ECut object.
+        """
+        if subset is None:
+            subset = self.indices
         else:
-            select = [self.indices[x] for x in select]
-        cut_obj = self.data_object.cut(start, end, select, precision, labels, monitor)
+            subset = [self.indices[x] for x in subset]
+        cut_obj = self.data_object.cut(start, end, subset, precision, labels, monitor)
         return cut_obj
 
     @staticmethod
-    def write_label(ax, text):
+    def _write_label(ax, text):
         ax.text(1.00, 1.00,
                 text,
                 transform=ax.transAxes, zorder=200, color='black',
@@ -711,6 +801,11 @@ class Plot2D(object):
                 verticalalignment='top')
 
     def set_norm(self, norm):
+        """
+        Set normalization to plots.
+        :param norm: matplotlib normalization object.
+        :return: None
+        """
         for patch in self.patches:
             patch.set_norm(norm)
 
@@ -768,6 +863,11 @@ def _draw_coverage_patch(ax_handle, locus):
 
 
 def ask_directory(title='Choose a folder'):
+    """
+    Show a dialog asking for a folder.
+    :param title:
+    :return: Path
+    """
     root = tkinter.Tk()
     root.withdraw()
     path = filedialog.askdirectory(initialdir='.', title=title)
@@ -776,6 +876,11 @@ def ask_directory(title='Choose a folder'):
 
 
 def list_flexx_files(path):
+    """
+    Lists all TASMAD scan files under a directory.
+    :param path: Source path.
+    :return: A list of file names.
+    """
     file_names = [os.path.join(path, s) for s in os.listdir(path) if (s.isdigit() and len(s) == 6)]
     return file_names
 
@@ -830,6 +935,18 @@ def _binning_1d_cut(start: np.ndarray, end: np.ndarray, points, tol_transverse=N
 
 
 def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expand_a3=False):
+    """
+
+    :param ki:
+    :param kf:
+    :param a3_start:
+    :param a3_end:
+    :param a4_start:
+    :param a4_end:
+    :param ub_matrix:
+    :param expand_a3:
+    :return:
+    """
     if a4_start > 0:
         a4_span = (NUM_CHANNELS - 1) * CHANNEL_SEPARATION
     else:

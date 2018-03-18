@@ -1,7 +1,7 @@
 # multiflexxlib
 Tools library for inelastic neutron spectroscopy detector array MultiFLEXX.
 ## Introduction
-`multiflexxlib` is a Python package for the visualization and treatment of neuron spectroscopy data from cold neutron continous angle multiple energy analysis (CAMEA) array detector MultiFLEXX. A detailed description on the detector can be found on [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html)
+`multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data from cold neutron continous angle multiple energy analysis (CAMEA) array detector MultiFLEXX. A detailed description on the detector can be found on [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html)
 
 ## Required Environment
 This package requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to skip the installation of some tricky packages like `numpy`.
