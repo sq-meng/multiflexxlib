@@ -1,3 +1,4 @@
+from __future__ import division
 import numpy as np
 from fractions import Fraction
 
@@ -25,6 +26,14 @@ class UBMatrix(object):
     UB-matrix handling object. Can be compared to each other using == operator to check if all settings are identical.
     """
     def __init__(self, latparam, hkl1, hkl2, plot_x=None, plot_y=None):
+        """
+        Create a UBMatrix object.
+        :param latparam: Lattice parameters in list form [a, b, c, alpha, beta, gamma] in Angstroms and degrees.
+        :param hkl1: Scattering plane HKL1 [h, k, l].
+        :param hkl2: Scattering plane HKL2 [h, k, l].
+        :param plot_x: x-axis of 2D-plots, [h, k, l]. Can be omitted if plot_x == hkl1 and plot_y == hkl2.
+        :param plot_y: y-axis of 2D-plots, [h, k, l]. Can be omitted if plot_x == hkl1 and plot_y == hkl2.
+        """
         self._latparam = latparam
         self._hkl1 = hkl1
         self._hkl2 = hkl2
@@ -70,10 +79,10 @@ class UBMatrix(object):
         hkl1_s = self.convert(self._hkl1, 'rs')
         hkl2_s = self.convert(self._hkl2, 'rs')
         if np.isclose(np.dot(hkl1_s, hkl2_s), 0):
-            self._plot_x = self.hkl1.copy()
-            self._plot_y = self.hkl2.copy()
+            self._plot_x = self.hkl1[:]
+            self._plot_y = self.hkl2[:]
         else:
-            self._plot_x = self._hkl1.copy()
+            self._plot_x = self._hkl1[:]
             plot_y_s = rotate_around_z(hkl1_s, np.pi/2).flatten()
             self._plot_y = self.convert(plot_y_s, 'sr')
 
@@ -160,7 +169,8 @@ class UBMatrix(object):
     def copy(self):
         return self.__copy__()
 
-    def __eq__(self, other: 'UBMatrix'):
+    def __eq__(self, other):
+        # type: (UBMatrix) -> bool
         if not isinstance(other, UBMatrix):
             raise TypeError('UBMatrix can only be checked for equality with another UBMatrix.')
         latparam_eq = np.all(self.latparam == other.latparam)

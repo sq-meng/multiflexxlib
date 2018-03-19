@@ -6,6 +6,8 @@ Tools library for inelastic neutron spectroscopy detector array MultiFLEXX.
 ## Required Environment
 This package requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to skip the installation of some tricky packages like `numpy`.
 
+Alternately, Python2 > 2.7 is partially supported. Most of the code is written with Python 2 compatibility in mind, but still might contain (additional) bugs.
+
 \>1GB of free memory is recommended.
 ## Installation
 run command `pip install multiflexxlib` in windows command console or linux console.
