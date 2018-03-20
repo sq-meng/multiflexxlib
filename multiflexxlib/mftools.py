@@ -440,7 +440,7 @@ def read_mf_scan(filename, ub_matrix=None, intensity_matrix=None):
     return scan_object
 
 
-def read_mf_scans(filename_list,  # type: [str]=None
+def read_mf_scans(filename_list=None,  # type: ['str']
                   ub_matrix=None, intensity_matrix=None, processes=1):
     """
     # type: (...) -> ['Scan']
@@ -721,7 +721,7 @@ class ConstECut(object):
     def to_csv(self):
         if len(self.cuts) > 1:
             # Solely to shift responsibility of managing files to user.
-            raise NotImplementedError('Please cut and save individually.')
+            raise NotImplementedError('Saving to CSV only supported for cuts only containing 1 set of data.')
         file = filedialog.asksaveasfile(initialdir=self.data_object.save_folder, defaultextension='.csv',
                                         filetypes=(('comma-separated values', '.csv'), ))
         self.cuts[0].to_csv(file)
