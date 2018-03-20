@@ -37,8 +37,16 @@ class UBMatrix(object):
         self._latparam = latparam
         self._hkl1 = hkl1
         self._hkl2 = hkl2
-        self._plot_x = plot_x
-        self._plot_y = plot_y
+        if plot_x is None or plot_y is None:
+            self._plot_x = self._hkl1
+            self._plot_y_nominal = self._hkl2
+            self._plot_y = None
+        else:
+            self._plot_x = plot_x
+            self._plot_y_nominal = plot_y
+            self._plot_y = None
+        self._theta = None
+        self.shear_coeff = None
 
         self.conversion_matrices = None
         self.figure_aspect = None
@@ -62,7 +70,19 @@ class UBMatrix(object):
 
     @property
     def plot_y(self):
+        return self._plot_y_nominal
+
+    @property
+    def plot_y_actual(self):
         return self._plot_y
+
+    @property
+    def is_orthogonal(self):
+        return np.isclose(self._theta, np.pi / 2)
+
+    @property
+    def theta(self):
+        return self._theta
 
     def update_conversion_matrices(self):
         self.conversion_matrices = dict()
@@ -70,21 +90,24 @@ class UBMatrix(object):
         self.conversion_matrices['bl'] = self._calculate_bl()
         self.conversion_matrices['rl'] = self._calculate_rl()
         self.conversion_matrices['sl'] = self._calculate_sl()
-        if self._plot_x is None or self._plot_y is None:
-            self._guess_plot_axes()
+        self._update_plot_axes()
         self.conversion_matrices['pl'] = self._calculate_pl()
-        self.figure_aspect = self._calculate_aspect()
+        self._calculate_aspect()
 
-    def _guess_plot_axes(self):
-        hkl1_s = self.convert(self._hkl1, 'rs')
-        hkl2_s = self.convert(self._hkl2, 'rs')
-        if np.isclose(np.dot(hkl1_s, hkl2_s), 0):
-            self._plot_x = self.hkl1[:]
-            self._plot_y = self.hkl2[:]
+    def _update_plot_axes(self):
+        norm = np.linalg.norm
+        plot_x_s = self.convert(self._plot_x, 'rs')
+        plot_nominal_y_s = self.convert(self._plot_y_nominal, 'rs')
+        if np.isclose(np.dot(plot_x_s, plot_nominal_y_s), 0):
+            self._plot_y = self._plot_y_nominal[:]
+            self._theta = np.pi / 2
+            self.shear_coeff = 0
         else:
-            self._plot_x = self._hkl1[:]
-            plot_y_s = rotate_around_z(hkl1_s, np.pi/2).flatten()
-            self._plot_y = self.convert(plot_y_s, 'sr')
+            self._theta = np.arccos(np.dot(plot_x_s, plot_nominal_y_s) / (norm(plot_x_s) * norm(plot_nominal_y_s)))
+            plot_y_s = rotate_around_z(plot_x_s, np.pi/2) / norm(plot_x_s) * norm(plot_nominal_y_s) * np.sin(self.theta)
+            plot_y_r = self.convert(plot_y_s, 'sr')
+            self._plot_y = plot_y_r
+            self.shear_coeff = norm(plot_nominal_y_s) * np.cos(self.theta) / norm(plot_x_s)
 
     def _calculate_bl(self):
         lattice_parameters = self._latparam
@@ -139,9 +162,11 @@ class UBMatrix(object):
     def _calculate_aspect(self):
         plot_x_r = self._plot_x
         plot_y_r = self._plot_y
-        plot_x_unit_len = np.linalg.norm(self.convert(plot_x_r, 'rs'))
-        plot_y_unit_len = np.linalg.norm(self.convert(plot_y_r, 'rs'))
-        return plot_y_unit_len / plot_x_unit_len
+        plot_x_s = self.convert(plot_x_r, 'rs')
+        plot_y_s = self.convert(plot_y_r, 'rs')
+        len_x = np.linalg.norm(plot_x_s)
+        len_y = np.linalg.norm(plot_y_s)
+        self.figure_aspect = len_y / len_x
 
     def convert(self, vectors, sys, axis=0):
         try:

@@ -13,6 +13,9 @@ import pyclipper
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
+from mpl_toolkits.axisartist import Subplot
+from mpl_toolkits.axisartist.grid_helper_curvelinear import GridHelperCurveLinear
+
 try:
     import tkinter
     from tkinter import filedialog
@@ -264,15 +267,16 @@ class Scan(object):
             a3_a4_mon_array[i * num_ch: (i + 1) * num_ch, 2] = self.data.loc[i, 'M1']
 
         data_template = pd.DataFrame(index=range(num_flat_frames * num_ch),
-                                     columns=['A3', 'A4', 'MON', 'px', 'py', 'pz', 'counts', 'valid', 'coeff',
+                                     columns=['A3', 'A4', 'MON', 'px', 'py', 'pz', 'h', 'k', 'l',
+                                              'counts', 'valid', 'coeff',
                                               'ach', 'point'], dtype='float64')
         data_template = data_template.assign(file=pd.Series(index=range(num_flat_frames * num_ch)), dtype='str')
         data_template.loc[:, ['A3', 'A4', 'MON']] = a3_a4_mon_array
         self.converted_dataframes = [data_template.copy() for _ in range(len(EF_LIST))]
         for ef_channel_num, ef in enumerate(EF_LIST):
-            self.converted_dataframes[ef_channel_num].loc[:, ['px', 'py', 'pz']] = self.ub_matrix.convert(
-                angle_to_qs(self.ki, etok(ef), a3_a4_mon_array[:, 0], a3_a4_mon_array[:, 1]), 'sp'
-            ).T
+            qs = angle_to_qs(self.ki, etok(ef), a3_a4_mon_array[:, 0], a3_a4_mon_array[:, 1])
+            self.converted_dataframes[ef_channel_num].loc[:, ['px', 'py', 'pz']] = self.ub_matrix.convert(qs, 'sp').T
+            self.converted_dataframes[ef_channel_num].loc[:, ['h', 'k', 'l']] = self.ub_matrix.convert(qs, 'sr').T
         coefficient = INTENSITY_COEFFICIENT
         detector_working = DETECTOR_WORKING
         for point_num in range(num_flat_frames):
@@ -360,7 +364,7 @@ def _bin_scan_points(data_frames, angle_tolerance=0.2):
     a4_cuts = bin_and_cut(joined_frames.A4, tolerance=angle_tolerance)
     group = joined_frames.groupby([a3_cuts, a4_cuts])
     sums = group['counts', 'counts_norm', 'MON'].sum()
-    means = group['A3', 'A4', 'px', 'py', 'pz'].mean()
+    means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
     error_bars = np.sqrt(sums.counts)
     per_monitor = sums.counts_norm / sums.MON
     result = pd.concat([sums, means], axis=1)
@@ -662,7 +666,7 @@ class BinnedData(object):
         return join_char.join(elements)
 
     def to_csv(self):
-        subdir_name = '+'.join(self.scan_files())
+        subdir_name = '+'.join(self.scan_files()) + '_out'
         full_dir_name = os.path.join(self.save_folder, subdir_name)
         try:  # not using exist_ok for python 2 compatibility
             os.makedirs(full_dir_name)
@@ -750,7 +754,7 @@ class ConstECut(object):
             locus_p = self.data_object.data.loc[self.data_indices[i], 'locus_p']
             points = self.data_object.data.loc[self.data_indices[i], 'points']
             indices = self.point_indices[i]
-            _draw_locus_outline(ax_top, )
+            _draw_locus_outline(ax_top, locus_p)
             # TODO: finish this
 
     def __len__(self):
@@ -765,8 +769,9 @@ class Plot2D(object):
         if subset is None:
             subset = data_object.data.index
         self.data_object = data_object
+        ub_matrix = self.data_object.ub_matrix
         rows, cols = _calc_figure_dimension(len(subset), cols)
-        self.f, axes = _init_plot_figure(rows, cols)
+        self.f, axes = _init_2dplot_figure(rows, cols, ub_matrix)
         self.axes = axes.reshape(-1)
         self.patches = None
         self.indices = subset
@@ -781,7 +786,7 @@ class Plot2D(object):
             aspect = self.aspect
         for nth, index in enumerate(self.indices):
             ax = self.axes[nth]
-            ax.grid(ls='--')
+            ax.grid(linestyle='--')
             ax.set_axisbelow(True)
             record = self.data_object.data.loc[index, :]
             _draw_locus_outline(ax, record.locus_p)
@@ -875,8 +880,30 @@ def _calc_figure_dimension(no_plots, cols=None):
         return int(rows), int(cols)
 
 
-def _init_plot_figure(rows, cols):
-    return np.array(plt.subplots(rows, cols, sharex='all', sharey='all'))
+def _init_2dplot_figure(rows, cols, ub_matrix):
+    # type: (int, int, UBMatrix) -> ...
+    if ub_matrix.is_orthogonal:
+        f, axes = plt.subplots(rows, cols, sharex='all', sharey='all')
+        return f, np.array(axes)
+    else:
+        f = plt.figure()
+
+        def tr(x, y):
+            x, y = np.asarray(x), np.asarray(y)
+            return x + y * ub_matrix.shear_coeff, y
+
+        def inv_tr(x, y):
+            x, y = np.asarray(x), np.asarray(y)
+            return x - y * ub_matrix.shear_coeff, y
+
+        grid_helper = GridHelperCurveLinear((tr, inv_tr))
+        axes = []
+        for i in range(1, rows * cols + 1):
+            ax = Subplot(f, rows, cols, i, grid_helper=grid_helper)
+            f.add_subplot(ax)
+            axes.append(ax)
+        return f, np.array(axes)
+
 
 
 def _draw_coverage_patch(ax_handle, locus):

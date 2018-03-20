@@ -39,8 +39,8 @@ def generate_vpatch(x, y=None, aspect=1, angle_mode=False):
     list_of_polygons = []
     for i in range(len(x)):
         region_index = vor.point_region[i]
-        vertice_indexes = vor.regions[region_index]
-        patch_vert_coords = [vor.vertices[vert_no] for vert_no in vertice_indexes]
+        vertices_indexes = vor.regions[region_index]
+        patch_vert_coords = [vor.vertices[vert_no] for vert_no in vertices_indexes]
         patch_vert_coords_array = np.array(patch_vert_coords)
         patch_vert_coords_array[:, 1] = patch_vert_coords_array[:, 1] / aspect
         list_of_polygons.append(patch_vert_coords_array)
