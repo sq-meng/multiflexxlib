@@ -18,11 +18,11 @@ def generate_vpatch(x, y=None, aspect=1, angle_mode=False):
     if aspect is None:
         aspect = 1
     if y is None:
-        x = np.array(x)
+        x = np.asarray(x)
         y = x[:, 1]
         x = x[:, 0]
-    x = np.array(x).ravel()
-    y = np.array(y).ravel()
+    x = np.asarray(x).ravel()
+    y = np.asarray(y).ravel()
     if not angle_mode:
         y = y.copy() * aspect
 
@@ -54,7 +54,7 @@ def draw_patches(list_of_polygons, intensity_list=None, cm='inferno', empty_face
     if not empty_face:
         if intensity_list is None:
             raise ValueError('values not provided for Voronoi plot.')
-        pc.set_array(np.array(intensity_list))
+        pc.set_array(np.asarray(intensity_list))
         pc.set_edgecolor('face')
         pc.set_cmap(cm)
         pc.set_norm(norm)

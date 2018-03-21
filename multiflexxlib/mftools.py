@@ -15,6 +15,8 @@ import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
 from mpl_toolkits.axisartist import Subplot
 from mpl_toolkits.axisartist.grid_helper_curvelinear import GridHelperCurveLinear
+from matplotlib.widgets import Cursor
+import pickle
 
 try:
     import tkinter
@@ -72,7 +74,7 @@ def _nan_int(string):
 def _parse_flatcone_line(line):
     data = np.array([_nan_int(x) for x in line.split()])
     array = np.reshape(data, (-1, len(EF_LIST)))[0: -1, :]  # throws out last line which is only artifact
-    ang_channels = np.array([np.arange(1, NUM_CHANNELS + 1)]).T  # starts at 1 to match stickers
+    ang_channels = np.asarray([np.arange(1, NUM_CHANNELS + 1)]).T  # starts at 1 to match stickers
     array_with_ch_no = np.hstack([ang_channels, array])
     dataframe_flatcone = pd.DataFrame(data=array_with_ch_no, columns=['aCh', 'e1', 'e2', 'e3', 'e4', 'e5'])
     dataframe_flatcone.set_index('aCh', inplace=True)
@@ -126,7 +128,7 @@ def parse_ill_data(file_object, start_flag='DATA_:\n'):
     column_names = data_section.splitlines()[0].split()
     # line only w 0-9, . -, spc, tab
     parameters_text_lines = re.findall('^[0-9*\-\s\t.]+?$', data_section, re.MULTILINE)
-    parameters_value_array = np.array([[_nan_float(num) for num in line.split()] for line in parameters_text_lines])
+    parameters_value_array = np.asarray([[_nan_float(num) for num in line.split()] for line in parameters_text_lines])
     data_frame = pd.DataFrame(data=parameters_value_array, columns=column_names)
     data_frame['PNT'] = data_frame['PNT'].astype('int16')
     df_clean = data_frame.T.drop_duplicates().T
@@ -268,9 +270,9 @@ class Scan(object):
 
         data_template = pd.DataFrame(index=range(num_flat_frames * num_ch),
                                      columns=['A3', 'A4', 'MON', 'px', 'py', 'pz', 'h', 'k', 'l',
-                                              'counts', 'valid', 'coeff',
-                                              'ach', 'point'], dtype='float64')
-        data_template = data_template.assign(file=pd.Series(index=range(num_flat_frames * num_ch)), dtype='str')
+                                              'counts', 'valid', 'coeff', 'ach', 'point'], dtype='float64')
+        # data_template = data_template.assign(file=pd.Series(index=range(num_flat_frames * num_ch)), dtype='str')
+        # filename source not recorded for now due to performance concerns
         data_template.loc[:, ['A3', 'A4', 'MON']] = a3_a4_mon_array
         self.converted_dataframes = [data_template.copy() for _ in range(len(EF_LIST))]
         for ef_channel_num, ef in enumerate(EF_LIST):
@@ -280,7 +282,7 @@ class Scan(object):
         coefficient = INTENSITY_COEFFICIENT
         detector_working = DETECTOR_WORKING
         for point_num in range(num_flat_frames):
-            flatcone_array = np.array(self.data.loc[point_num, 'flat'])
+            flatcone_array = np.asarray(self.data.loc[point_num, 'flat'])
             for ef_channel_num in range(len(EF_LIST)):
                 dataframe = self.converted_dataframes[ef_channel_num]
                 rows = slice(point_num * num_ch, (point_num + 1) * num_ch - 1, None)
@@ -289,7 +291,7 @@ class Scan(object):
                 dataframe.loc[rows, 'coeff'] = coefficient[:, ef_channel_num]
                 dataframe.loc[rows, 'point'] = self.data.loc[point_num, 'PNT']
                 dataframe.loc[rows, 'ach'] = range(1, num_ch + 1)
-                dataframe.loc[rows, 'file'] = self.file_name
+                # dataframe.loc[rows, 'file'] = self.file_name
 
     def _update_scan_ranges(self):
         a3_start = self.data.iloc[0]['A3']
@@ -326,7 +328,7 @@ def _make_bin_edges(values, tolerance=0.2):
     tolerance / 2 further from either end.
     """
     values_array = np.array(values).ravel()
-    unique_values = np.array(list(set(values_array)))
+    unique_values = np.asarray(list(set(values_array)))
     unique_values.sort()
     bin_edges = [unique_values[0] - tolerance / 2]
     for i in range(len(unique_values) - 1):
@@ -402,14 +404,17 @@ def bin_scans(list_of_data,  # type: ['Scan']
     :return: BinnedData object.
     """
     all_data = pd.DataFrame(index=range(len(list_of_data) * len(EF_LIST)),
-                            columns=['name', 'ei', 'ef', 'en', 'tt', 'mag', 'points', 'locus_a', 'locus_p'])
+                            columns=['name', 'ei', 'ef', 'en', 'tt', 'mag', 'points', 'locus_a', 'locus_p'],
+                            dtype=object)
     file_names = [data.file_name for data in list_of_data]
     for i, scan in enumerate(list_of_data):
         for j in range(len(EF_LIST)):
             ef = EF_LIST[j]
-            all_data.loc[i * len(EF_LIST) + j, :] = [scan.file_name, scan.ei, ef, scan.ei - ef,
-                                                     scan.tt, scan.mag, scan.converted_dataframes[j],
-                                                     scan.actual_locus_list[j], scan.planned_locus_list[j]]
+            all_data.loc[i * len(EF_LIST) + j, ['name', 'ei', 'ef', 'en']] = [scan.file_name, scan.ei, ef, scan.ei - ef]
+            all_data.loc[i * len(EF_LIST) + j, ['tt', 'mag']] = [scan.tt, scan.mag]
+            all_data.loc[i * len(EF_LIST) + j, ['points', 'locus_a', 'locus_p']] = [scan.converted_dataframes[j],
+                                                                                    scan.actual_locus_list[j],
+                                                                                    scan.planned_locus_list[j]]
 
     all_data = all_data.fillna(nan_fill)
     cut_ei = bin_and_cut(all_data.ei, en_tolerance)
@@ -578,7 +583,7 @@ class BinnedData(object):
             else:
                 intensities = df_filtered['counts_norm']
             yerr = intensities / np.sqrt(df_filtered['counts'])
-            percentiles = voronoi_plot.projection_on_segment(np.array(points), seg, self.ub_matrix.figure_aspect)
+            percentiles = voronoi_plot.projection_on_segment(np.asarray(points), seg, self.ub_matrix.figure_aspect)
             result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr}).sort_values(by='x')
             cut_results.append(result)
         cut_object = ConstECut(cut_results, point_indices, self, subset, start, end)
@@ -615,7 +620,7 @@ class BinnedData(object):
         point_indices = []
         for index in subset:
             frame = self.data.loc[index, 'points']
-            points_s = self.ub_matrix.convert(np.array(frame.loc[:, ['px', 'py', 'pz']]), 'ps', axis=1)
+            points_s = self.ub_matrix.convert(np.asarray(frame.loc[:, ['px', 'py', 'pz']]), 'ps', axis=0)
             pd_cut = _binning_1d_cut(start_s, end_s, points_s, xtol, ytol)
             group = frame.groupby(pd_cut)
             counts_norm = group.counts_norm.sum().dropna()
@@ -626,7 +631,7 @@ class BinnedData(object):
             yerr = counts_permon * yerr_scale
             coords_p = group['px', 'py', 'pz'].mean().dropna()
 
-            coords_s = self.ub_matrix.convert(coords_p, 'ps', axis=1)
+            coords_s = self.ub_matrix.convert(coords_p, 'ps', axis=0)
             projections = voronoi_plot.projection_on_segment(coords_s, np.vstack((start_s, end_s)))
             cut_result = pd.DataFrame({'x': projections, 'y': counts_permon, 'yerr': yerr}).dropna().reset_index(drop=True)
             indices = pd_cut[0].dropna().index.intersection(pd_cut[1].dropna().index)
@@ -709,6 +714,14 @@ class BinnedData(object):
         """
         print(self)
 
+    def dump(self, file_name=None):
+        if file_name is None:
+            file = filedialog.asksaveasfile(initialdir=self.save_folder, defaultextension='.dmp', mode='wb',
+                                            filetypes=(('multiflexxlib dump', '.dmp'),))
+        else:
+            file = open(file_name, 'wb')
+        pickle.dump(self, file)
+
 
 class ConstECut(object):
     def __init__(self, cuts, point_indices, data_object, data_indices, start, end):
@@ -728,6 +741,8 @@ class ConstECut(object):
             raise NotImplementedError('Saving to CSV only supported for cuts only containing 1 set of data.')
         file = filedialog.asksaveasfile(initialdir=self.data_object.save_folder, defaultextension='.csv',
                                         filetypes=(('comma-separated values', '.csv'), ))
+        if file is None:
+            return
         self.cuts[0].to_csv(file)
 
     def plot(self, precision=2, labels=None):
@@ -773,10 +788,19 @@ class Plot2D(object):
         rows, cols = _calc_figure_dimension(len(subset), cols)
         self.f, axes = _init_2dplot_figure(rows, cols, ub_matrix)
         self.axes = axes.reshape(-1)
+        self._set_hkl_formatter()
         self.patches = None
         self.indices = subset
         self.aspect = aspect
         self.__plot__()
+
+    def _set_hkl_formatter(self):
+        def format_coord(x, y):
+            hkl = self.data_object.ub_matrix.convert([x, y, 0], 'pr')
+            length = np.linalg.norm(self.data_object.ub_matrix.convert(hkl, 'rs'))
+            return 'h={:.2f}, k={:.2f}, l={:.2f}, qm={:.2f}'.format(*hkl, length)
+        for ax in self.axes:
+            ax.format_coord = format_coord
 
     def __plot__(self):
         self.patches = []
@@ -786,7 +810,7 @@ class Plot2D(object):
             aspect = self.aspect
         for nth, index in enumerate(self.indices):
             ax = self.axes[nth]
-            ax.grid(linestyle='--')
+            ax.grid(linestyle='--', zorder=0)
             ax.set_axisbelow(True)
             record = self.data_object.data.loc[index, :]
             _draw_locus_outline(ax, record.locus_p)
@@ -799,7 +823,7 @@ class Plot2D(object):
             v_fill.set_clip_path(coverage_patch)
             ax.set_aspect(aspect)
             xlabel, ylabel = ub.guess_axes_labels(self.data_object.ub_matrix.plot_x,
-                                                  self.data_object.ub_matrix.plot_y)
+                                                  self.data_object.ub_matrix.plot_y_nominal)
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
 
@@ -849,7 +873,7 @@ class Plot2D(object):
 
 def _draw_locus_outline(ax, locuses):
     for locus in locuses:
-        locus = np.array(locus)
+        locus = np.asarray(locus)
         ax.plot(locus[:, 0], locus[:, 1], lw=0.2)
 
 
@@ -899,11 +923,15 @@ def _init_2dplot_figure(rows, cols, ub_matrix):
         grid_helper = GridHelperCurveLinear((tr, inv_tr))
         axes = []
         for i in range(1, rows * cols + 1):
-            ax = Subplot(f, rows, cols, i, grid_helper=grid_helper)
+            if i == 1:
+                ax = Subplot(f, rows, cols, i, grid_helper=grid_helper)
+            else:
+                ax = Subplot(f, rows, cols, i, grid_helper=grid_helper, sharex=axes[0], sharey=axes[0])
+            ax.xaxis.set_label_coords(0.5, -0.1)
+            ax.yaxis.set_label_coords(0.5, -0.1)
             f.add_subplot(ax)
             axes.append(ax)
         return f, np.array(axes)
-
 
 
 def _draw_coverage_patch(ax_handle, locus):
@@ -979,7 +1007,7 @@ def _binning_1d_cut(start, end, points, tol_transverse=None, tol_lateral=None):
     start_rot = ub.rotate_around_z(start, angle)
     end_rot = ub.rotate_around_z(end, angle)
     scaling_factor = float((end_rot - start_rot)[0])
-    points_rot = pd.DataFrame(ub.rotate_around_z(np.array(points.loc[:, ['x', 'y', 'z']]), angles=angle, axis=0),
+    points_rot = pd.DataFrame(ub.rotate_around_z(np.asarray(points.loc[:, ['x', 'y', 'z']]), angles=angle, axis=0),
                               index=points.index, columns=['x', 'y', 'z'])
     points_scaled = (points_rot - start_rot) / scaling_factor
     xtol = tol_transverse / scaling_factor
@@ -1030,3 +1058,17 @@ def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expan
     p_locus = ub_matrix.convert(s_locus, 'sp')
 
     return np.ndarray.tolist(p_locus[0:2, :].T)
+
+
+def load(file_name=None):
+    # type: (str) -> BinnedData
+    if file_name is None:
+        file = filedialog.askopenfile(defaultextension='.dmp', mode='rb',
+                                      filetypes=(('multiflexxlib dump', '.dmp'),))
+    else:
+        file = open(file_name, 'rb')
+
+    if file is None:
+        raise IOError('Error accessing dump file %s' % file_name)
+    else:
+        return pickle.load(file)

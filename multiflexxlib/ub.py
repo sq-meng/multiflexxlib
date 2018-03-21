@@ -69,7 +69,7 @@ class UBMatrix(object):
         return self._plot_x
 
     @property
-    def plot_y(self):
+    def plot_y_nominal(self):
         return self._plot_y_nominal
 
     @property
@@ -168,7 +168,15 @@ class UBMatrix(object):
         len_y = np.linalg.norm(plot_y_s)
         self.figure_aspect = len_y / len_x
 
-    def convert(self, vectors, sys, axis=0):
+    def convert(self, vectors, sys, axis=1):
+        """
+        Convert between coordinate systems in UB-matrix
+        r-Reciprocal, s-Sample table, p-Plot
+        :param vectors: xyz or N*3 array or 3*N array.
+        :param sys: String representation of source and destination system. 'rs' converts from r to s system.
+        :param axis: Works along which axis.
+        :return: Vector or ndarray of same dimension as input.
+        """
         try:
             conversion_matrix = self.conversion_matrices['sys']
         except KeyError:
@@ -181,15 +189,15 @@ class UBMatrix(object):
             self.conversion_matrices[sys[::-1]] = np.linalg.inv(conversion_matrix)
         finally:
             pass
-        if axis == 0:
+        if axis == 1:
             return np.dot(conversion_matrix, vectors)
-        elif axis == 1:
+        elif axis == 0:
             return np.dot(conversion_matrix, vectors.T).T
         else:
             raise ValueError('invalid axis for ub-matrix vectors')
 
     def __copy__(self):
-        return UBMatrix(self._latparam, self.hkl1, self.hkl2, self.plot_x, self.plot_y)
+        return UBMatrix(self._latparam, self.hkl1, self.hkl2, self.plot_x, self.plot_y_nominal)
 
     def copy(self):
         return self.__copy__()
@@ -200,7 +208,7 @@ class UBMatrix(object):
             raise TypeError('UBMatrix can only be checked for equality with another UBMatrix.')
         latparam_eq = np.all(self.latparam == other.latparam)
         hkl_eq = np.all(self.hkl1 == other.hkl1) and np.all(self.hkl2 == other.hkl2)
-        plot_eq = np.all(self.plot_x == other.plot_x) and np.all(self.plot_y == other.plot_y)
+        plot_eq = np.all(self.plot_x == other.plot_x) and np.all(self.plot_y_nominal == other.plot_y_nominal)
 
         if latparam_eq and hkl_eq and plot_eq:
             return True
