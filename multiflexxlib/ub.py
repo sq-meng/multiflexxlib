@@ -177,6 +177,7 @@ class UBMatrix(object):
         :param axis: Works along which axis.
         :return: Vector or ndarray of same dimension as input.
         """
+        vectors = np.asarray(vectors)
         try:
             conversion_matrix = self.conversion_matrices['sys']
         except KeyError:
@@ -320,6 +321,14 @@ def find_triangle_angles(a, b, c):
 
 
 def angle_to_qs(ki, kf, a3, a4):
+    """
+    # type: (float, float, ...) -> ...
+    :param ki: ki, in angstroms^-1
+    :param kf: kf, in angstroms^-1
+    :param a3: np.ndarray or list or float of A3 angles
+    :param a4: A4 angles
+    :return: q vectors in S system, 3xN array if input is in iterable form.
+    """
     try:
         length = min(len(a3), len(a4))
     except TypeError:

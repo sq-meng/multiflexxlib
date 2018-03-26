@@ -2,6 +2,8 @@ from __future__ import division
 import multiprocessing as mp
 import itertools
 import numpy as np
+from scipy import interpolate
+from pylab import flipud
 import pandas as pd
 from pandas.core.categorical import Categorical
 import re
@@ -13,20 +15,21 @@ import pyclipper
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
+from matplotlib.colors import LogNorm
+from matplotlib.widgets import Button, TextBox
 from mpl_toolkits.axisartist import Subplot
 from mpl_toolkits.axisartist.grid_helper_curvelinear import GridHelperCurveLinear
-from matplotlib.widgets import Cursor
 import pickle
-
+import warnings
+import os
+import pkg_resources
 try:
     import tkinter
     from tkinter import filedialog
 except ImportError:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
-import os
-# from typing import List
-import pkg_resources
+
 
 NUM_CHANNELS = 31
 EF_LIST = [2.5, 3.0, 3.5, 4.0, 4.5]
@@ -516,7 +519,7 @@ class _MergedLocus(list):
 
     def __str__(self):
         patches = len(self)
-        total_vertices = np.sum([len(patch) for patch in self])
+        total_vertices = float(np.sum([len(patch) for patch in self]))
         return '%dp %dv' % (patches, total_vertices)
 
 
@@ -538,8 +541,6 @@ class BinnedData(object):
         self.data = source_dataframe
         self.ub_matrix = ub_matrix
         self._generate_patch()
-        self.last_cut = None
-        self.last_plot = None
 
     def __str__(self):
         return str(pd.concat((self.data[['ei', 'en', 'tt', 'mag']],
@@ -587,7 +588,6 @@ class BinnedData(object):
             result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr}).sort_values(by='x')
             cut_results.append(result)
         cut_object = ConstECut(cut_results, point_indices, self, subset, start, end)
-        self.last_cut = cut_object
         cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
@@ -641,9 +641,9 @@ class BinnedData(object):
         cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def plot(self, subset=None, columns=None, aspect=None):
-        plot_object = Plot2D(data_object=self, subset=subset, cols=columns, aspect=aspect)
-        self.last_plot = plot_object
+    def plot(self, subset=None, columns=None, aspect=None, plot_type=None, controls=True):
+        plot_object = Plot2D(data_object=self, subset=subset, cols=columns, aspect=aspect, plot_type=plot_type,
+                             controls=controls)
         return plot_object
 
     def make_label(self, index, multiline=False, precision=2, columns=None):
@@ -761,16 +761,26 @@ class ConstECut(object):
         self.figure.tight_layout()
 
     def inspect(self):
-        f, axes = plt.subplots(nrows=2)
+        """
+        Check which data points are included in the cuts.
+        :return: None
+        """
+        f, axes = plt.subplots(nrows=2, ncols=len(self.cuts), sharex='row', sharey='row')
         axes = axes.reshape(2, -1)
-        for i in range(len(self.cuts)):
+        for i,cut in enumerate(self.cuts):
             ax_top = axes[0, i]
+            ax_top.set_aspect(self.data_object.ub_matrix.figure_aspect)
             ax_bottom = axes[1, i]
             locus_p = self.data_object.data.loc[self.data_indices[i], 'locus_p']
             points = self.data_object.data.loc[self.data_indices[i], 'points']
             indices = self.point_indices[i]
-            _draw_locus_outline(ax_top, locus_p)
-            # TODO: finish this
+            draw_locus_outline(ax_top, locus_p)
+            ax_top.scatter(x=points.px[indices], y=points.py[indices], c=points.permon[indices], zorder=10, s=12)
+            ax_top.scatter(x=points.px, y=points.py, c=[0.8, 0.8, 0.8], zorder=0, s=8)
+            title = self.data_object.make_label(index=self.data_indices[i], multiline=False)
+            ax_bottom.set_title(title)
+            ax_bottom.errorbar(cut.x, cut.y, yerr=cut.yerr, fmt='o')
+        f.tight_layout()
 
     def __len__(self):
         return len(self.data_indices)
@@ -780,9 +790,11 @@ class Plot2D(object):
     """
     2D const-E plots. Should not be instantiated by invoking its constructor.
     """
-    def __init__(self, data_object, subset=None, cols=None, aspect=None):
+    def __init__(self, data_object, subset=None, cols=None, aspect=None, plot_type=None, controls=False):
         if subset is None:
             subset = data_object.data.index
+        if plot_type is None:
+            plot_type = 'v'
         self.data_object = data_object
         ub_matrix = self.data_object.ub_matrix
         rows, cols = _calc_figure_dimension(len(subset), cols)
@@ -792,17 +804,22 @@ class Plot2D(object):
         self.patches = None
         self.indices = subset
         self.aspect = aspect
-        self.__plot__()
+        self.cbar = None
+        self.f.data_object = self
+        self.__plot__(plot_type)
+        if controls:
+            self.controls = dict()
+            self.add_controls()
 
     def _set_hkl_formatter(self):
         def format_coord(x, y):
             hkl = self.data_object.ub_matrix.convert([x, y, 0], 'pr')
             length = np.linalg.norm(self.data_object.ub_matrix.convert(hkl, 'rs'))
-            return 'h={:.2f}, k={:.2f}, l={:.2f}, qm={:.2f}'.format(*hkl, length)
+            return 'h={:.2f}, k={:.2f}, l={:.2f}, qm={:.2f}'.format(hkl[0], hkl[1], hkl[2], length)
         for ax in self.axes:
             ax.format_coord = format_coord
 
-    def __plot__(self):
+    def __plot__(self, plottype):
         self.patches = []
         if self.aspect is None:
             aspect = self.data_object.ub_matrix.figure_aspect
@@ -813,24 +830,32 @@ class Plot2D(object):
             ax.grid(linestyle='--', zorder=0)
             ax.set_axisbelow(True)
             record = self.data_object.data.loc[index, :]
-            _draw_locus_outline(ax, record.locus_p)
+            method_char = plottype[nth % len(plottype)]
+            if method_char == 'v':
+                self.patches.append(draw_voronoi_patch(ax, record))
+            elif method_char == 'd':
+                self.patches.append(draw_interpolated_patch(ax, record,
+                                                            aspect=self.data_object.ub_matrix.figure_aspect))
+            elif method_char == 'm':
+                self.patches.append(draw_voronoi_patch(ax, record, mesh=True))
+            else:
+                self.patches.append(draw_voronoi_patch(ax, record))  # default to plotting voronoi patch
+
+            draw_locus_outline(ax, record.locus_p)
+
             legend_str = self.data_object.make_label(index, multiline=True)
-            self._write_label(ax, legend_str)
-            values = record.points.permon / record.points.permon.max() + 1e-10  # to avoid drawing zero counts as empty
-            v_fill = voronoi_plot.draw_patches(record.voro, values)
-            coverage_patch = _draw_coverage_patch(ax, record.locus_a)
-            ax.add_collection(v_fill)
-            v_fill.set_clip_path(coverage_patch)
+
             ax.set_aspect(aspect)
             xlabel, ylabel = ub.guess_axes_labels(self.data_object.ub_matrix.plot_x,
                                                   self.data_object.ub_matrix.plot_y_nominal)
             ax.set_xlabel(xlabel)
             ax.set_ylabel(ylabel)
-
             ax.set_xlim([record.points.px.min(), record.points.px.max()])
             ax.set_ylim([record.points.py.min(), record.points.py.max()])
-            self.patches.append(v_fill)
+
+            self._write_label(ax, legend_str)
         self.f.tight_layout()
+        plt.show(block=False)
 
     def to_eps(self):
         pass
@@ -870,9 +895,78 @@ class Plot2D(object):
         for patch in self.patches:
             patch.set_norm(norm)
 
+    def add_colorbar(self):
+        f = self.f
+        f.subplots_adjust(right=0.85)
+        cbar_ax = f.add_axes([0.9, 0.1, 0.02, 0.8])
+        cbar = f.colorbar(self.patches[0], cax=cbar_ax)
+        cbar.set_label('Normalized intensity (a.u.)')
+        self.cbar = cbar
 
-def _draw_locus_outline(ax, locuses):
-    for locus in locuses:
+    def set_lognorm(self, vmin=0.01, vmax=1):
+        self.set_norm(LogNorm(vmin=0.01, vmax=1))
+
+    def set_linear(self, vmin=0, vmax=1):
+        self.set_norm(None)
+        self.set_clim(vmin, vmax)
+
+    def set_clim(self, vmin, vmax):
+        for p in self.patches:
+            p.set_clim((vmin, vmax))
+
+    def add_controls(self):
+        self.f.subplots_adjust(bottom=0.2)
+        row_pos = 0
+        # LogNorm
+        ax = self.f.add_axes([row_pos * 0.1 + 0.1, 0.05, 0.09, 0.05])
+        button = Button(ax, 'Log')
+        self.controls['log'] = button
+        button.on_clicked(lambda event: self.set_lognorm())
+        # Linear
+        row_pos += 1
+        ax = self.f.add_axes([row_pos * 0.1 + 0.1, 0.05, 0.09, 0.05])
+        button = Button(ax, 'Linear')
+        self.controls['linear'] = button
+        button.on_clicked(lambda event: self.set_linear())
+
+
+def draw_voronoi_patch(ax, record, mesh=False):
+    """
+    Puts down Voronoi representation on axes object
+    :param ax: Matplotlib axes object.
+    :param record: A row in BinnedData.data
+    :param mesh: Whether only draw mesh.
+    :return: PathCollection
+    """
+    values = record.points.permon / record.points.permon.max() + 1e-10  # to avoid drawing zero counts as empty
+    v_fill = voronoi_plot.draw_patches(record.voro, values, mesh=mesh)
+    coverage_patch = _draw_coverage_mask(ax, record.locus_a)
+    ax.add_collection(v_fill)
+    v_fill.set_clip_path(coverage_patch)
+    return v_fill
+
+
+def draw_interpolated_patch(ax, record, aspect=1, method='nearest'):
+    # to avoid drawing zero counts as empty
+    values = np.asarray(record.points.permon / record.points.permon.max() + 1e-10)
+    px = record.points.px
+    py = record.points.py
+    ay = record.points.py * aspect
+    x_min, x_max = px.min() - 0.01, px.max() + 0.01
+    y_min, y_max = ay.min() - 0.01, ay.max() + 0.01
+    py_min, py_max = py.min() - 0.01, py.max() + 0.01
+    x_grid, y_grid = np.mgrid[x_min:x_max:0.002, y_min:y_max:0.002]
+    signal_grid = interpolate.griddata(np.vstack([px, ay]).T, values, (x_grid, y_grid), method='nearest')
+    mesh = ax.imshow(flipud(signal_grid.T), cmap='inferno',
+                     extent=[x_min, x_max, py_min, py_max],
+                     zorder=10, interpolation='nearest')
+    coverage_patch = _draw_coverage_mask(ax, record.locus_a)
+    mesh.set_clip_path(coverage_patch)
+    return mesh
+
+
+def draw_locus_outline(ax, list_of_locuses):
+    for locus in list_of_locuses:
         locus = np.asarray(locus)
         ax.plot(locus[:, 0], locus[:, 1], lw=0.2)
 
@@ -911,16 +1005,7 @@ def _init_2dplot_figure(rows, cols, ub_matrix):
         return f, np.array(axes)
     else:
         f = plt.figure()
-
-        def tr(x, y):
-            x, y = np.asarray(x), np.asarray(y)
-            return x + y * ub_matrix.shear_coeff, y
-
-        def inv_tr(x, y):
-            x, y = np.asarray(x), np.asarray(y)
-            return x - y * ub_matrix.shear_coeff, y
-
-        grid_helper = GridHelperCurveLinear((tr, inv_tr))
+        grid_helper = _create_grid_helper(ub_matrix.shear_coeff)
         axes = []
         for i in range(1, rows * cols + 1):
             if i == 1:
@@ -934,7 +1019,19 @@ def _init_2dplot_figure(rows, cols, ub_matrix):
         return f, np.array(axes)
 
 
-def _draw_coverage_patch(ax_handle, locus):
+def _create_grid_helper(shear_coeff):
+    def tr(x, y):
+        x, y = np.asarray(x), np.asarray(y)
+        return x + y * shear_coeff, y
+
+    def inv_tr(x, y):
+        x, y = np.asarray(x), np.asarray(y)
+        return x - y * shear_coeff, y
+
+    return GridHelperCurveLinear((tr, inv_tr))
+
+
+def _draw_coverage_mask(ax_handle, locus):
     mpath_path = mpl_path.Path
     combined_verts = np.zeros([0, 2])
     combined_codes = []
@@ -1025,16 +1122,16 @@ def _binning_1d_cut(start, end, points, tol_transverse=None, tol_lateral=None):
 
 def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expand_a3=False):
     """
-
-    :param ki:
-    :param kf:
-    :param a3_start:
-    :param a3_end:
-    :param a4_start:
-    :param a4_end:
-    :param ub_matrix:
-    :param expand_a3:
-    :return:
+    Calculate Q-space coverage of a const-E scan.
+    :param ki: ki.
+    :param kf: kf.
+    :param a3_start: A3 angle start.
+    :param a3_end: A3 angle end. Could be bigger or smaller than start.
+    :param a4_start: A4 start
+    :param a4_end: A4 end
+    :param ub_matrix: UBMatrix object.
+    :param expand_a3: expand A3 by a minuscule amount to avoid numerical precision problems.
+    :return: N*2 array of point coordinates on plot in p system.
     """
     if a4_start > 0:
         a4_span = (NUM_CHANNELS - 1) * CHANNEL_SEPARATION

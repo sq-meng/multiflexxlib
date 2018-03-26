@@ -48,10 +48,10 @@ def generate_vpatch(x, y=None, aspect=1, angle_mode=False):
     return list_of_polygons
 
 
-def draw_patches(list_of_polygons, intensity_list=None, cm='inferno', empty_face=False, norm=None, alpha=None):
-    patches = [Polygon(polygon, lw=0.1) for polygon in list_of_polygons]
+def draw_patches(list_of_polygons, intensity_list=None, cm='inferno', mesh=False, norm=None):
+    patches = [Polygon(polygon, lw=0.02) for polygon in list_of_polygons]
     pc = PatchCollection(patches)
-    if not empty_face:
+    if not mesh:
         if intensity_list is None:
             raise ValueError('values not provided for Voronoi plot.')
         pc.set_array(np.asarray(intensity_list))
@@ -65,6 +65,8 @@ def draw_patches(list_of_polygons, intensity_list=None, cm='inferno', empty_face
 
 
 def check_bbox(first, second):
+    first = np.asarray(first)
+    second = np.asarray(second)
     first_x_min = np.min(first[:, 0])
     first_x_max = np.max(first[:, 0])
     first_y_min = np.min(first[:, 1])
@@ -166,3 +168,30 @@ def projection_on_segment(points, segment, aspect=1):
         percentiles.append(norm(point_sh) * cos_theta / norm(segment_sh))
 
     return np.array(percentiles)
+
+
+def point_in_polygon(point, polygon):
+    # type: (...) -> bool
+    """
+    If given point on 2D-space is in given polygon.
+    :param point: [x, y]
+    :param polygon: N*2 array of vertices.
+    :return: bool
+    """
+    px, py = point
+    intersections = []
+    for i in range(len(polygon)):
+        ax, ay = polygon[i - 1]
+        bx, by = polygon[i]
+        if (by - py) * (ay - py) < 0:
+            percentile = abs(py - ay) / abs(by - ay)  # approaches 1 if p ~~ b
+            intersection = ax + (bx - ax) * percentile
+            intersections.append(intersection)
+    intersections.append(px)
+    intersections.sort()
+    ind = intersections.index(px)
+
+    if ind % 2 == 1:
+        return True
+    else:
+        return False
