@@ -953,7 +953,7 @@ class ConstECut(object):
         """
         f, axes = plt.subplots(nrows=2, ncols=len(self.cuts), sharex='row', sharey='row')
         axes = axes.reshape(2, -1)
-        for i,cut in enumerate(self.cuts):
+        for i, cut in enumerate(self.cuts):
             ax_top = axes[0, i]
             ax_top.set_aspect(self.data_object.ub_matrix.figure_aspect)
             self.data_object.set_axes_labels(ax_top)
@@ -1426,7 +1426,7 @@ def load(file_name=None):
     :param file_name: Which file to load.
     :return: BinnedData object.
     """
-    # type: (str) -> BinnedData
+    # type: str -> BinnedData
     if file_name is None:
         file = filedialog.askopenfile(defaultextension='.dmp', mode='rb',
                                       filetypes=(('multiflexxlib dump', '.dmp'),))
