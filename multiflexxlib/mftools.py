@@ -108,7 +108,7 @@ def _parse_param_line(line):
 def parse_ill_data(file_object, start_flag='DATA_:\n'):
     """
     Parses ILL TASMAD scan files.
-    :param file_object: Handle to opened file or stream.
+    :param file_object: Handle to opened file or stream. Or alternately path to scan file.
     :param start_flag: Start flag of data section. Omit for default.
     :return: (header_dict, dataframe)
     """
@@ -231,18 +231,34 @@ class Scan(object):
 
     @property
     def ei(self):
+        """
+        Initial Energy (Ei) of scan.
+        :return: Ei in meV
+        """
         return ktoe(self.ki)
 
     @property
     def np_planned(self):
+        """
+        Total planned points in scan based on command.
+        :return: Integer steps.
+        """
         return self.header['COMND']['NP']
 
     @property
     def np_actual(self):
+        """
+        Actual finished points. Different from planned if scan is unfinished.
+        :return: Integer steps.
+        """
         return len(self.data)
 
     @property
     def scan_number(self):
+        """
+        Scan number.
+        :return: String of scan file name, which should be numeric for TASMAD files.
+        """
         return os.path.split(self.file_name)[1]
 
     def _update_locus(self):
@@ -319,7 +335,7 @@ class Scan(object):
         pass
 
 
-def _make_bin_edges(values, tolerance=0.2):
+def make_bin_edges(values, tolerance=0.2):
     # type: ((list, pd.Series), float) -> list
     """
     :param values: An iterable list of all physical quantities, repetitions allowed.
@@ -345,7 +361,7 @@ def _make_bin_edges(values, tolerance=0.2):
     return bin_edges
 
 
-def _bin_locus(locus_list):
+def _merge_locus(locus_list):
     clipper = pyclipper.Pyclipper()
     for locus in locus_list:
         clipper.AddPath(pyclipper.scale_to_clipper(locus), pyclipper.PT_SUBJECT)
@@ -354,7 +370,7 @@ def _bin_locus(locus_list):
     return merged_locus
 
 
-def _bin_scan_points(data_frames, angle_tolerance=0.2):
+def _merge_scan_points(data_frames, angle_tolerance=0.2):
     """
     Bins actual detector counts together from multiple runs.
     :param data_frames: Pandas data frames from Scan objects.
@@ -381,12 +397,23 @@ def _bin_scan_points(data_frames, angle_tolerance=0.2):
 
 def bin_and_cut(data, tolerance=0.2):
     # type: (pd.Series, float) -> Categorical
-    bin_edges = _make_bin_edges(data, tolerance)
+    """
+    Applies adaptive binning and return a pandas.Categorical cut object
+    :param data: a series or list of numbers. Repetition allowed.
+    :param tolerance: Binning tolerance.
+    :return: pd.cut results.
+    """
+    bin_edges = make_bin_edges(data, tolerance)
     cut = pd.cut(data, bin_edges)
     return cut
 
 
 def series_to_binder(items):
+    """
+    Helper function for converting list to _DataBinder object. The _DataBinder class is just for overriding str method.
+    :param items: Anything that makes sense with list(items).
+    :return:
+    """
     # type: (pd.Series) -> _DataBinder
     return _DataBinder(list(items))
 
@@ -511,7 +538,7 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
 
 class _DataBinder(list):
     """
-    Helper class to override printing behaviour.
+    Helper class to override __str__ behaviour.
     """
     def __str__(self):
         return '%d items' % len(self)
@@ -519,11 +546,11 @@ class _DataBinder(list):
 
 class _MergedLocus(list):
     """
-    Helper class to override printing behaviour.
+    Helper class to override __str__ behaviour.
     """
     def __init__(self, items):
         # type: (_DataBinder) -> None
-        binned_locus = _bin_locus(items)
+        binned_locus = _merge_locus(items)
         super(_MergedLocus, self).__init__(binned_locus)
 
     def __str__(self):
@@ -533,10 +560,10 @@ class _MergedLocus(list):
 
 
 class _MergedDataPoints(pd.DataFrame):
-    # Helper class to override printing behaviour.
+    # Helper class to override __str__ behaviour.
     def __init__(self, items, angle_tolerance=0.2):
         # type: (_DataBinder, float) -> None
-        binned_points = _bin_scan_points(items, angle_tolerance=angle_tolerance)
+        binned_points = _merge_scan_points(items, angle_tolerance=angle_tolerance)
         super(_MergedDataPoints, self).__init__(binned_points)
 
     def __str__(self):
@@ -546,12 +573,22 @@ class _MergedDataPoints(pd.DataFrame):
 class BinnedData(object):
     def __init__(self, source_dataframe, file_names, ub_matrix=None):
         # type: (pd.DataFrame, [str], UBMatrix) -> None
+        """
+        Should not be instantiated on its own.
+        :param source_dataframe:
+        :param file_names:
+        :param ub_matrix:
+        """
         self._file_names = file_names
         self.data = source_dataframe
         self.ub_matrix = ub_matrix
         self._generate_voronoi()
 
     def file_names(self):
+        """
+        Files used in this dataset.
+        :return: List of strings.
+        """
         return self._file_names
 
     def __str__(self):
@@ -608,6 +645,18 @@ class BinnedData(object):
         return cut_object
 
     def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None):
+        """
+        Generate 1D-cuts with rectangular bins.
+        :param start: starting point in r.l.u., vector.
+        :param end: ending point in r.l.u., vector.
+        :param subset: a list of indices to cut. Omit to cut all available data.
+        :param xtol: Bin size along cutting axis, in absolute reciprocal length.
+        :param ytol: Lateral half bin size in [h, k, l] or absolute reciprocal length.
+        :param no_points: Number of bins along cutting axis.
+        :param precision: refer to make_label method.
+        :param labels: refer to make_label method.
+        :return: ConstECut object.
+        """
         # Find absolute tolerances
         if xtol is not None and ytol is not None:
             raise ValueError('Only either of ytol or np should be supplied.')
@@ -663,6 +712,18 @@ class BinnedData(object):
         return cut_object
 
     def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True):
+        # type: (..., list, int, float, str, bool) -> 'Plot2D'
+        """
+        Generate const-E colormaps.
+        :param subset: list, indices of entries to be plotted. Omit to plot all.
+        :param cols: How many columns should resulting plot have.
+        :param aspect: y-x aspect ratio of generated plot. Larger value means unit length of y axis is greater. Omit to
+        scale to equal length in absolute reciprocal length.
+        :param plot_type: String. 'v': Voronoi, 'm': Mesh, 's': Scatter, 'd' Delaunay interpolation. Will be cycles for
+        all plots. e.g. 'vm' will alternate between Voronoi patches and mesh.
+        :param controls: True to show controls on screen.
+        :return: Plot2D object.
+        """
         plot_object = Plot2D(data_object=self, subset=subset, cols=cols, aspect=aspect, style=plot_type,
                              controls=controls)
         return plot_object
@@ -673,7 +734,7 @@ class BinnedData(object):
         Makes legend entries for plots.
         :param multiline: If a newline is inserted between each property.
         :param index: Index of record to operate on.
-        :param precision: precision of values.
+        :param precision: precision of values in labels.
         :param columns: which properties to present in legend. None for all.
         :return: String representing an legend entry.
         """
@@ -719,6 +780,14 @@ class BinnedData(object):
                 np.savetxt(full_name, patch, delimiter=',', header='px, py', comments='')
 
     def draw_voronoi_patch(self, ax, index, mesh=False, set_aspect=True):
+        """
+        Draw Voronoi tessellation patch on given ax.
+        :param ax: matplotlib axes object.
+        :param index: index of data entry to plot.
+        :param mesh: True to only plot Voronoi tessellation mesh and no color.
+        :param set_aspect: Set aspect to equal in absolute reciprocal length.
+        :return: matplotlib collection.
+        """
         record = self.data.loc[index, :]
         patch = draw_voronoi_patch(ax, record, mesh)
         if set_aspect:
@@ -727,6 +796,14 @@ class BinnedData(object):
         return patch
 
     def draw_interpolated_patch(self, ax, index, method='nearest', set_aspect=True):
+        """
+        Draw interpolated patch.
+        :param ax: matplotlib axes object.
+        :param index: index of data entry to plot.
+        :param method: Interpolation method.
+        :param set_aspect: Set aspect to equal in absolute reciprocal length.
+        :return: matplotlib collection.
+        """
         record = self.data.loc[index, :]
         patch = draw_interpolated_patch(ax, record, method=method)
         if set_aspect:
@@ -734,6 +811,14 @@ class BinnedData(object):
         return patch
 
     def draw_scatter(self, ax, index, color=True, set_aspect=True):
+        """
+        Draw round scatter points.
+        :param ax: matplotlib axes object.
+        :param index: index of data entry to plot.
+        :param color: If use colormap to show data.
+        :param set_aspect: Set aspect to equal in absolute reciprocal length.
+        :return: matplotlib collection.
+        """
         record = self.data.loc[index, :]
         s = draw_scatter(ax, record, color=color)
         if set_aspect:
@@ -741,15 +826,29 @@ class BinnedData(object):
         return s
 
     def set_axes_labels(self, ax):
+        """
+        Set axes labels (like [H 0 0]) to ax object.
+        :param ax: Which ax to set to.
+        :return: None
+        """
         xlabel, ylabel = ub.guess_axes_labels(self.ub_matrix.plot_x, self.ub_matrix.plot_y_nominal)
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
 
     @property
     def save_folder(self):
+        """
+        Gives the folder of first data file. A good place to export CSV files.
+        :return: path
+        """
         return os.path.dirname(self._file_names[0])
 
     def scan_files(self, full=False):
+        """
+        Which scan files are included in this dataset.
+        :param full: Returns full path.
+        :return: list of strings.
+        """
         if full:
             return self._file_names
         else:
@@ -757,12 +856,17 @@ class BinnedData(object):
 
     def summary(self):
         """
-        Print a summary of contained data.
+        Print a summary of contained data to STDOUT.
         :return: None
         """
         print(self)
 
     def dump(self, file_name=None):
+        """
+        Pickle and dump self.
+        :param file_name: File name to dump to.
+        :return: None
+        """
         if file_name is None:
             file = filedialog.asksaveasfile(initialdir=self.save_folder, defaultextension='.dmp', mode='wb',
                                             filetypes=(('multiflexxlib dump', '.dmp'),))
@@ -789,6 +893,16 @@ class BinnedData(object):
 
 class ConstECut(object):
     def __init__(self, cuts, point_indices, list_bin_polygons, data_object, data_indices, start, end):
+        """
+        Const-E cut object, should not be instantiated on its own.
+        :param cuts:
+        :param point_indices:
+        :param list_bin_polygons:
+        :param data_object:
+        :param data_indices:
+        :param start:
+        :param end:
+        """
         self.cuts = cuts
         self.data_object = data_object
         self.data_indices = data_indices
@@ -801,6 +915,10 @@ class ConstECut(object):
         self.end_r = end
 
     def to_csv(self):
+        """
+        Export to CSV file. Only supports cuts with only one set of data to avoid confusion.
+        :return: None
+        """
         if len(self.cuts) > 1:
             # Solely to shift responsibility of managing files to user.
             raise NotImplementedError('Saving to CSV only supported for cuts only containing 1 set of data.')
@@ -811,6 +929,12 @@ class ConstECut(object):
         self.cuts[0].to_csv(file)
 
     def plot(self, precision=2, labels=None):
+        """
+        Plot cut results.
+        :param precision: Precision used in labels.
+        :param labels: Which labels to include.
+        :return: None. Access figure and axes objects from self.figure, self.ax respectively.
+        """
         self.figure, self.ax = plt.subplots()
         self.artists = []
         ax = self.ax
@@ -824,7 +948,7 @@ class ConstECut(object):
 
     def inspect(self):
         """
-        Check which data points are included in the cuts.
+        Generate a graph showing which data points are included in the cuts.
         :return: None
         """
         f, axes = plt.subplots(nrows=2, ncols=len(self.cuts), sharex='row', sharey='row')
@@ -851,6 +975,11 @@ class ConstECut(object):
         return f, axes
 
     def set_axes_labels(self, ax):
+        """
+        Set axes labels
+        :param ax: Which axes object to set on.
+        :return: None
+        """
         ax.set_ylabel('Intensity (a.u.)')
         start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
         end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
@@ -948,9 +1077,17 @@ class Plot2D(object):
         cut_obj = self.data_object.cut(start, end, subset, precision, labels, monitor)
         return cut_obj
 
-    def update_label(self, index, labels):
+    def update_label(self, index, labels, precision=2):
+        """
+        Update label on figure.
+        :param index: which ax to update
+        :param labels: which labels to include, list.
+        :param precision: Decimal position of generated labels.
+        :return:
+        """
         ax = self.axes[index]
-        label_text = self.data_object.make_label(self.indices[index], multiline=True, columns=labels)
+        label_text = self.data_object.make_label(self.indices[index], multiline=True, columns=labels,
+                                                 precision=precision)
         label = ax.findobj(match=lambda o: o.get_gid() == 'label')
         label[0].set_text(label_text)
 
@@ -972,6 +1109,7 @@ class Plot2D(object):
             patch.set_norm(norm)
 
     def add_colorbar(self):
+        """Add colorbar to plot. For production."""
         f = self.f
         f.subplots_adjust(right=0.8)
         cbar_ax = f.add_axes([0.83, 0.1, 0.02, 0.8])
@@ -980,17 +1118,39 @@ class Plot2D(object):
         self.cbar = cbar
 
     def set_lognorm(self, vmin=0.01, vmax=1):
+        """
+        Sets Log10 colormap normalization to plot.
+        :param vmin: min value. needs to be larger than 0.
+        :param vmax: max value.
+        :return: None
+        """
         self.set_norm(LogNorm(vmin=vmin, vmax=vmax))
 
     def set_linear(self, vmin=0, vmax=1):
+        """
+        Sets linear normalization to plot.
+        :param vmin: min value.
+        :param vmax: max value.
+        :return:
+        """
         self.set_norm(None)
         self.set_clim(vmin, vmax)
 
     def set_clim(self, vmin, vmax):
+        """
+        Sets limits to colormaps.
+        :param vmin: vmin
+        :param vmax: vmax
+        :return:
+        """
         for p in self.patches:
             p.set_clim((vmin, vmax))
 
     def add_controls(self):
+        """
+        Adds control buttons to figure.
+        :return: None
+        """
         self.f.subplots_adjust(bottom=0.2)
         row_pos = 0
         # LogNorm
@@ -1261,6 +1421,11 @@ def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expan
 
 
 def load(file_name=None):
+    """
+    Restores dumped binaly pickle to a name.
+    :param file_name: Which file to load.
+    :return: BinnedData object.
+    """
     # type: (str) -> BinnedData
     if file_name is None:
         file = filedialog.askopenfile(defaultextension='.dmp', mode='rb',
