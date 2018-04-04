@@ -1,4 +1,4 @@
-import multiflexxlib.voronoi_plot as vor
+import multiflexxlib.plotting as vor
 
 
 def test_point_in_poly():

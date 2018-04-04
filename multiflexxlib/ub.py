@@ -216,6 +216,9 @@ class UBMatrix(object):
         else:
             return False
 
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
 
 def rotate_around_z(vectors, angles, axis=1):
     """

@@ -8,7 +8,7 @@ import pandas as pd
 from pandas.core.categorical import Categorical
 import re
 from collections import defaultdict
-from multiflexxlib import voronoi_plot
+from multiflexxlib import plotting
 from multiflexxlib import ub
 from multiflexxlib.ub import UBMatrix, etok, ktoe, angle_to_qs
 import pyclipper
@@ -223,7 +223,7 @@ class Scan(object):
         except KeyError:
             self.mag = None
 
-        self.planned_locus_list, self.actual_locus_list = [], []
+        self.planned_locus_list, self.actual_locus_list = None, None
         self._update_locus()
         self.converted_dataframes = []
         self._populate_data_array()
@@ -494,7 +494,16 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
     :param angle_tolerance: A3 and A4 angle tolerance, default is 0.2deg.
     :return: BinnedData object.
     """
-    items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+    if filename_list is None:
+        items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+    else:
+        if isinstance(filename_list, list):
+            items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+        elif os.path.isdir(filename_list):
+            filename_list = list_flexx_files(filename_list)
+            items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+        else:
+            raise ValueError('%s: Got a parameter that is neither a list nor a directory')
     df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance,
                    angle_tolerance=angle_tolerance)
     return df
@@ -540,21 +549,24 @@ class BinnedData(object):
         self._file_names = file_names
         self.data = source_dataframe
         self.ub_matrix = ub_matrix
-        self._generate_patch()
+        self._generate_voronoi()
+
+    def file_names(self):
+        return self._file_names
 
     def __str__(self):
         return str(pd.concat((self.data[['ei', 'en', 'tt', 'mag']],
                               self.data[['locus_a', 'locus_p', 'points']].astype('str')), axis=1))
 
-    def _generate_patch(self):
-        # TODO: defuse this iterator landmine
+    def _generate_voronoi(self):
+        # TODO: defuse this iterator landmine: is this iterating through index column or what?
         list_of_lop = []
-        for item in self.data['points']:
-            lop = voronoi_plot.generate_vpatch(item['px'], item['py'], self.ub_matrix.figure_aspect)
+        for i, item in enumerate(self.data['points']):
+            lop = plotting.generate_vpatch(item['px'], item['py'], self.ub_matrix.figure_aspect)
             list_of_lop.append(lop)
         self.data = self.data.assign(voro=list_of_lop)
 
-    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True):
+    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True, bin_tolerance=None):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
@@ -563,6 +575,7 @@ class BinnedData(object):
         :param precision: refer to make_label method.
         :param labels: refer to make_label method.
         :param monitor: if normalize by monitor count.
+        :param bin_tolerance: re-binning tolerance.
         :return: ECut object.
         """
         start_p = self.ub_matrix.convert(start, 'rp')[0:2]
@@ -572,10 +585,13 @@ class BinnedData(object):
             subset = self.data.index
         cut_results = []
         point_indices = []
+        list_bin_polygons = []
         for index in subset:
             df = self.data.loc[index, 'points']
             voro = self.data.loc[index, 'voro']
-            included = voronoi_plot.segment_intersect_polygons(seg, voro)
+            included = plotting.segment_intersect_polygons(seg, voro)
+            bin_polygons = [v for v, include in zip(voro, included) if include]
+            list_bin_polygons.append(bin_polygons)
             df_filtered = df.loc[included]
             point_indices.append(df_filtered.index)
             points = df_filtered[['px', 'py']]
@@ -584,16 +600,15 @@ class BinnedData(object):
             else:
                 intensities = df_filtered['counts_norm']
             yerr = intensities / np.sqrt(df_filtered['counts'])
-            percentiles = voronoi_plot.projection_on_segment(np.asarray(points), seg, self.ub_matrix.figure_aspect)
+            percentiles = plotting.projection_on_segment(np.asarray(points), seg, self.ub_matrix.figure_aspect)
             result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr}).sort_values(by='x')
             cut_results.append(result)
-        cut_object = ConstECut(cut_results, point_indices, self, subset, start, end)
+        cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
         cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
     def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None):
-        if subset is None:
-            subset = self.data.index
+        # Find absolute tolerances
         if xtol is not None and ytol is not None:
             raise ValueError('Only either of ytol or np should be supplied.')
         start_s = self.ub_matrix.convert(start, 'rs')
@@ -616,8 +631,12 @@ class BinnedData(object):
                 ytol = np.linalg.norm(self.ub_matrix.convert(ytol, 'rs'))
         else:
             ytol = xtol
+        # End finding tolerances
+        if subset is None:
+            subset = self.data.index
         cut_results = []
         point_indices = []
+        list_bin_polygons = []
         for index in subset:
             frame = self.data.loc[index, 'points']
             points_s = self.ub_matrix.convert(np.asarray(frame.loc[:, ['px', 'py', 'pz']]), 'ps', axis=0)
@@ -630,19 +649,21 @@ class BinnedData(object):
             counts_permon = counts_norm / monitor
             yerr = counts_permon * yerr_scale
             coords_p = group['px', 'py', 'pz'].mean().dropna()
-
             coords_s = self.ub_matrix.convert(coords_p, 'ps', axis=0)
-            projections = voronoi_plot.projection_on_segment(coords_s, np.vstack((start_s, end_s)))
+            projections = plotting.projection_on_segment(coords_s, np.vstack((start_s, end_s)))
             cut_result = pd.DataFrame({'x': projections, 'y': counts_permon, 'yerr': yerr}).dropna().reset_index(drop=True)
             indices = pd_cut[0].dropna().index.intersection(pd_cut[1].dropna().index)
             cut_results.append(cut_result)
             point_indices.append(indices)
-        cut_object = ConstECut(cut_results, point_indices, self, subset, start, end)
+            bin_polygons_s = _rectangular_bin_bounds(start_s, end_s, xtol, ytol)
+            bin_polygons = [self.ub_matrix.convert(bins, sys='sp', axis=0)[:, 0:2] for bins in bin_polygons_s]
+            list_bin_polygons.append(bin_polygons)
+        cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
         cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def plot(self, subset=None, columns=None, aspect=None, plot_type=None, controls=True):
-        plot_object = Plot2D(data_object=self, subset=subset, cols=columns, aspect=aspect, plot_type=plot_type,
+    def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True):
+        plot_object = Plot2D(data_object=self, subset=subset, cols=cols, aspect=aspect, style=plot_type,
                              controls=controls)
         return plot_object
 
@@ -697,6 +718,33 @@ class BinnedData(object):
                 full_name = os.path.join(index_dir, file_name)
                 np.savetxt(full_name, patch, delimiter=',', header='px, py', comments='')
 
+    def draw_voronoi_patch(self, ax, index, mesh=False, set_aspect=True):
+        record = self.data.loc[index, :]
+        patch = draw_voronoi_patch(ax, record, mesh)
+        if set_aspect:
+            ax.set_aspect(self.ub_matrix.figure_aspect)
+        self.set_axes_labels(ax)
+        return patch
+
+    def draw_interpolated_patch(self, ax, index, method='nearest', set_aspect=True):
+        record = self.data.loc[index, :]
+        patch = draw_interpolated_patch(ax, record, method=method)
+        if set_aspect:
+            ax.set_aspect(self.ub_matrix.figure_aspect)
+        return patch
+
+    def draw_scatter(self, ax, index, color=True, set_aspect=True):
+        record = self.data.loc[index, :]
+        s = draw_scatter(ax, record, color=color)
+        if set_aspect:
+            ax.set_aspect(self.ub_matrix.figure_aspect)
+        return s
+
+    def set_axes_labels(self, ax):
+        xlabel, ylabel = ub.guess_axes_labels(self.ub_matrix.plot_x, self.ub_matrix.plot_y_nominal)
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel(ylabel)
+
     @property
     def save_folder(self):
         return os.path.dirname(self._file_names[0])
@@ -722,13 +770,30 @@ class BinnedData(object):
             file = open(file_name, 'wb')
         pickle.dump(self, file)
 
+    def __copy__(self):
+        return BinnedData(self.data, self._file_names, self.ub_matrix)
+
+    def copy(self):
+        return self.__copy__()
+
+    def __add__(self, other):
+        # type: (BinnedData) -> BinnedData
+        file_names = set(self.file_names() + other.file_names())
+        if self.ub_matrix != other.ub_matrix:
+            raise ValueError('Cannot merge BinnedData objects with different ub-matrix')
+        else:
+            ub_matrix = self.ub_matrix
+        data = pd.concat([self.data, other.data], axis=0, ignore_index=True)
+        return BinnedData(data, file_names, ub_matrix)
+
 
 class ConstECut(object):
-    def __init__(self, cuts, point_indices, data_object, data_indices, start, end):
+    def __init__(self, cuts, point_indices, list_bin_polygons, data_object, data_indices, start, end):
         self.cuts = cuts
         self.data_object = data_object
         self.data_indices = data_indices
         self.point_indices = point_indices
+        self.list_bin_polygons = list_bin_polygons
         self.figure, self.ax = None, None
         self.artists = None
         self.legend = None
@@ -754,10 +819,7 @@ class ConstECut(object):
             artist = ax.errorbar(cut.x, cut.y, yerr=cut.yerr, fmt='o', label=label)
             self.artists.append(artist)
         self.legend = ax.legend()
-        ax.set_ylabel('Intensity (a.u.)')
-        start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
-        end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
-        ax.set_xlabel('Cut from %s to %s' % (start_xlabel, end_xlabel))
+        self.set_axes_labels(ax)
         self.figure.tight_layout()
 
     def inspect(self):
@@ -770,17 +832,29 @@ class ConstECut(object):
         for i,cut in enumerate(self.cuts):
             ax_top = axes[0, i]
             ax_top.set_aspect(self.data_object.ub_matrix.figure_aspect)
+            self.data_object.set_axes_labels(ax_top)
             ax_bottom = axes[1, i]
             locus_p = self.data_object.data.loc[self.data_indices[i], 'locus_p']
             points = self.data_object.data.loc[self.data_indices[i], 'points']
             indices = self.point_indices[i]
             draw_locus_outline(ax_top, locus_p)
+            bins_collection = plotting.draw_patches(self.list_bin_polygons[i], mesh=True)
+            ax_top.add_collection(bins_collection)
             ax_top.scatter(x=points.px[indices], y=points.py[indices], c=points.permon[indices], zorder=10, s=12)
             ax_top.scatter(x=points.px, y=points.py, c=[0.8, 0.8, 0.8], zorder=0, s=8)
+            plotting.draw_line(ax_top, [self.start_r, self.end_r], self.data_object.ub_matrix)
             title = self.data_object.make_label(index=self.data_indices[i], multiline=False)
             ax_bottom.set_title(title)
+            self.set_axes_labels(ax_bottom)
             ax_bottom.errorbar(cut.x, cut.y, yerr=cut.yerr, fmt='o')
         f.tight_layout()
+        return f, axes
+
+    def set_axes_labels(self, ax):
+        ax.set_ylabel('Intensity (a.u.)')
+        start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
+        end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
+        ax.set_xlabel('Relative position\n%s to %s' % (start_xlabel, end_xlabel))
 
     def __len__(self):
         return len(self.data_indices)
@@ -790,11 +864,11 @@ class Plot2D(object):
     """
     2D const-E plots. Should not be instantiated by invoking its constructor.
     """
-    def __init__(self, data_object, subset=None, cols=None, aspect=None, plot_type=None, controls=False):
+    def __init__(self, data_object, subset=None, cols=None, aspect=None, style=None, controls=False):
         if subset is None:
             subset = data_object.data.index
-        if plot_type is None:
-            plot_type = 'v'
+        if style is None:
+            style = 'v'
         self.data_object = data_object
         ub_matrix = self.data_object.ub_matrix
         rows, cols = _calc_figure_dimension(len(subset), cols)
@@ -806,7 +880,7 @@ class Plot2D(object):
         self.aspect = aspect
         self.cbar = None
         self.f.data_object = self
-        self.__plot__(plot_type)
+        self.__plot__(style)
         if controls:
             self.controls = dict()
             self.add_controls()
@@ -819,7 +893,7 @@ class Plot2D(object):
         for ax in self.axes:
             ax.format_coord = format_coord
 
-    def __plot__(self, plottype):
+    def __plot__(self, style):
         self.patches = []
         if self.aspect is None:
             aspect = self.data_object.ub_matrix.figure_aspect
@@ -830,7 +904,7 @@ class Plot2D(object):
             ax.grid(linestyle='--', zorder=0)
             ax.set_axisbelow(True)
             record = self.data_object.data.loc[index, :]
-            method_char = plottype[nth % len(plottype)]
+            method_char = style[nth % len(style)]
             if method_char == 'v':
                 self.patches.append(draw_voronoi_patch(ax, record))
             elif method_char == 'd':
@@ -838,21 +912,17 @@ class Plot2D(object):
                                                             aspect=self.data_object.ub_matrix.figure_aspect))
             elif method_char == 'm':
                 self.patches.append(draw_voronoi_patch(ax, record, mesh=True))
+            elif method_char == 's':
+                self.patches.append(draw_scatter(ax, record))
             else:
                 self.patches.append(draw_voronoi_patch(ax, record))  # default to plotting voronoi patch
 
             draw_locus_outline(ax, record.locus_p)
-
-            legend_str = self.data_object.make_label(index, multiline=True)
-
             ax.set_aspect(aspect)
-            xlabel, ylabel = ub.guess_axes_labels(self.data_object.ub_matrix.plot_x,
-                                                  self.data_object.ub_matrix.plot_y_nominal)
-            ax.set_xlabel(xlabel)
-            ax.set_ylabel(ylabel)
+            self.data_object.set_axes_labels(ax)
             ax.set_xlim([record.points.px.min(), record.points.px.max()])
             ax.set_ylim([record.points.py.min(), record.points.py.max()])
-
+            legend_str = self.data_object.make_label(index, multiline=True)
             self._write_label(ax, legend_str)
         self.f.tight_layout()
         plt.show(block=False)
@@ -878,13 +948,19 @@ class Plot2D(object):
         cut_obj = self.data_object.cut(start, end, subset, precision, labels, monitor)
         return cut_obj
 
+    def update_label(self, index, labels):
+        ax = self.axes[index]
+        label_text = self.data_object.make_label(self.indices[index], multiline=True, columns=labels)
+        label = ax.findobj(match=lambda o: o.get_gid() == 'label')
+        label[0].set_text(label_text)
+
     @staticmethod
     def _write_label(ax, text):
         ax.text(1.00, 1.00,
                 text,
                 transform=ax.transAxes, zorder=200, color='black',
                 bbox={'facecolor': 'white', 'alpha': 0.8, 'pad': 5}, horizontalalignment='right',
-                verticalalignment='top')
+                verticalalignment='top', gid='label')
 
     def set_norm(self, norm):
         """
@@ -897,14 +973,14 @@ class Plot2D(object):
 
     def add_colorbar(self):
         f = self.f
-        f.subplots_adjust(right=0.85)
-        cbar_ax = f.add_axes([0.9, 0.1, 0.02, 0.8])
+        f.subplots_adjust(right=0.8)
+        cbar_ax = f.add_axes([0.83, 0.1, 0.02, 0.8])
         cbar = f.colorbar(self.patches[0], cax=cbar_ax)
         cbar.set_label('Normalized intensity (a.u.)')
         self.cbar = cbar
 
     def set_lognorm(self, vmin=0.01, vmax=1):
-        self.set_norm(LogNorm(vmin=0.01, vmax=1))
+        self.set_norm(LogNorm(vmin=vmin, vmax=vmax))
 
     def set_linear(self, vmin=0, vmax=1):
         self.set_norm(None)
@@ -939,14 +1015,14 @@ def draw_voronoi_patch(ax, record, mesh=False):
     :return: PathCollection
     """
     values = record.points.permon / record.points.permon.max() + 1e-10  # to avoid drawing zero counts as empty
-    v_fill = voronoi_plot.draw_patches(record.voro, values, mesh=mesh)
+    v_fill = plotting.draw_patches(record.voro, values, mesh=mesh)
     coverage_patch = _draw_coverage_mask(ax, record.locus_a)
     ax.add_collection(v_fill)
     v_fill.set_clip_path(coverage_patch)
     return v_fill
 
 
-def draw_interpolated_patch(ax, record, aspect=1, method='nearest'):
+def draw_interpolated_patch(ax, record, aspect=1, method='linear'):
     # to avoid drawing zero counts as empty
     values = np.asarray(record.points.permon / record.points.permon.max() + 1e-10)
     px = record.points.px
@@ -956,7 +1032,7 @@ def draw_interpolated_patch(ax, record, aspect=1, method='nearest'):
     y_min, y_max = ay.min() - 0.01, ay.max() + 0.01
     py_min, py_max = py.min() - 0.01, py.max() + 0.01
     x_grid, y_grid = np.mgrid[x_min:x_max:0.002, y_min:y_max:0.002]
-    signal_grid = interpolate.griddata(np.vstack([px, ay]).T, values, (x_grid, y_grid), method='nearest')
+    signal_grid = interpolate.griddata(np.vstack([px, ay]).T, values, (x_grid, y_grid), method=method, fill_value=0)
     mesh = ax.imshow(flipud(signal_grid.T), cmap='inferno',
                      extent=[x_min, x_max, py_min, py_max],
                      zorder=10, interpolation='nearest')
@@ -965,10 +1041,21 @@ def draw_interpolated_patch(ax, record, aspect=1, method='nearest'):
     return mesh
 
 
+def draw_scatter(ax, record, color=True, colormap='inferno', size=12):
+    if color:
+        values = np.asarray(record.points.permon / record.points.permon.max() + 1e-10)
+    else:
+        values = 0
+    px = record.points.px
+    py = record.points.py
+    s = ax.scatter(x=px, y=py, c=values, cmap=colormap, s=size)
+    return s
+
+
 def draw_locus_outline(ax, list_of_locuses):
     for locus in list_of_locuses:
         locus = np.asarray(locus)
-        ax.plot(locus[:, 0], locus[:, 1], lw=0.2)
+        ax.plot(locus[:, 0], locus[:, 1], lw=0.05)
 
 
 def _calc_figure_dimension(no_plots, cols=None):
@@ -1076,6 +1163,22 @@ def _unpack_user_hkl(user_input):
         raise ValueError('Not a valid h, k, l input.')
 
     return unpacked
+
+
+def _rectangular_bin_bounds(start_s, end_s, xtol, ytol):
+    start_s, end_s = np.asarray(start_s), np.asarray(end_s)
+    delta = end_s - start_s
+    norm_delta = np.linalg.norm(delta)
+    no_bins = int((norm_delta + xtol / 2) // xtol + 1)
+    delta_x_unit = delta / np.linalg.norm(delta)
+    delta_y_unit = ub.rotate_around_z(delta_x_unit, np.pi / 2)
+    dx = delta_x_unit * xtol / 2
+    dy = delta_y_unit * ytol
+    first_bin = np.vstack([start_s - dx - dy, start_s - dx + dy, start_s + dx + dy, start_s + dx - dy])
+    bins = []
+    for i in range(no_bins):
+        bins.append(first_bin + dx * 2 * i)
+    return bins
 
 
 def _binning_1d_cut(start, end, points, tol_transverse=None, tol_lateral=None):

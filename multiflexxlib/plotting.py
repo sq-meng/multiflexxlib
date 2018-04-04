@@ -1,7 +1,8 @@
 from __future__ import division
 from scipy.spatial import Voronoi
 import numpy as np
-
+import pyclipper
+import multiflexxlib.ub as ub
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
 
@@ -171,27 +172,15 @@ def projection_on_segment(points, segment, aspect=1):
 
 
 def point_in_polygon(point, polygon):
-    # type: (...) -> bool
-    """
-    If given point on 2D-space is in given polygon.
-    :param point: [x, y]
-    :param polygon: N*2 array of vertices.
-    :return: bool
-    """
-    px, py = point
-    intersections = []
-    for i in range(len(polygon)):
-        ax, ay = polygon[i - 1]
-        bx, by = polygon[i]
-        if (by - py) * (ay - py) < 0:
-            percentile = abs(py - ay) / abs(by - ay)  # approaches 1 if p ~~ b
-            intersection = ax + (bx - ax) * percentile
-            intersections.append(intersection)
-    intersections.append(px)
-    intersections.sort()
-    ind = intersections.index(px)
-
-    if ind % 2 == 1:
+    stc = pyclipper.scale_to_clipper
+    in_polygon = pyclipper.PointInPolygon(stc(point), stc(polygon))
+    if in_polygon == 1:
         return True
     else:
         return False
+
+
+def draw_line(ax, points, ub_matrix, sys='r'):
+    # type: (..., (np.ndarray, list), ub.UBMatrix, str) -> ...
+    points_p = ub_matrix.convert(points, sys=sys+'p', axis=0)
+    return ax.plot(points_p[:, 0], points_p[:, 1])
