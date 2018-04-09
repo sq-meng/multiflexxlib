@@ -23,6 +23,7 @@ import pickle
 import warnings
 import os
 import pkg_resources
+
 try:
     import tkinter
     from tkinter import filedialog
@@ -73,6 +74,17 @@ def _nan_int(string):
         else:
             raise
 
+
+def _extract_ki_from_header(en, fx, kfix):
+    e_fix = ktoe(kfix)
+    if fx == 2:
+        ei = e_fix - en
+        return etok(ei)
+    elif fx == 1:
+        ei = e_fix + en
+        return etok(ei)
+    else:
+        raise ValueError('Invalid FX value: 2 for fix kf, 1 for fix ki, got %d' % fx)
 
 def _parse_flatcone_line(line):
     data = np.array([_nan_int(x) for x in line.split()])
@@ -209,7 +221,9 @@ class Scan(object):
             try:
                 self.ki = etok(self.data.iloc[0]['EI'])
             except KeyError:
-                raise KeyError('File %s records neither ki nor Ei.' % self.file_name)
+                # raise KeyError('File %s records neither ki nor Ei.' % self.file_name)
+                self.ki = _extract_ki_from_header(self.header['POSQE']['EN'], self.header['PARAM']['FX'],
+                                                  self.header['PARAM']['KFIX'])
 
         self.a3_ranges, self.a4_ranges = None, None
         self._update_scan_ranges()
@@ -592,7 +606,7 @@ class BinnedData(object):
         return self._file_names
 
     def __str__(self):
-        return str(pd.concat((self.data[['ei', 'en', 'tt', 'mag']],
+        return str(pd.concat((self.data[['ei', 'en', 'ef', 'tt', 'mag']],
                               self.data[['locus_a', 'locus_p', 'points']].astype('str')), axis=1))
 
     def _generate_voronoi(self):

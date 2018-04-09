@@ -4,24 +4,24 @@ Tools library for inelastic neutron spectroscopy detector array MultiFLEXX.
 `multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data from cold neutron continous angle multiple energy analysis (CAMEA) array detector MultiFLEXX. A detailed description on the detector can be found on [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html)
 
 ## Required Environment
-This package requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to skip the installation of some tricky packages like `numpy`.
+This package requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to make your life easier.
 
-Alternately, Python2 > 2.7 is partially supported. Most of the code is written with Python 2 compatibility in mind, but still might contain (additional) bugs.
+Alternately, Python2 > 2.7 is partially supported. Most of the code is written with Python 2 compatibility in mind, but might contain (additional) bugs.
 
-\>1GB of free memory is recommended.
+\>1GB of free memory recommended.
 ## Installation
-run command `pip install multiflexxlib` in windows command console or linux console.
+run command `pip install multiflexxlib` from windows or linux command console.
 ## Usage
 ### Minimal Usage
 Download file [run.py](https://github.com/yumemi5k/multiflexxlib/blob/master/run.py) and save  somewhere. Double-click on saved file and subset the folder containing only your MultiFLEXX scan files when asked for data folder. All possible 2D const-E plots will be shown.
 ### Extended Usage
-Although this section is written with users less familiar with Python in mind, a minimal knowledge of Python language is recommended.
+Please also refer to docstrings of classes and functions, accessible through `help()` function, e.g. `help(mfl.UBMatrix)`. Please drop author a message if something is not explained well.
 
 It is possible and recommended to use this package in an interactive Python interpreter such as `IPython` or a Matlab-esque Python development environment like `Spyder`, which both come with default `Anaconda` installation.
 
 `import multiflexxlib as mfl`
 
-This is required before you can start using the package. ```mfl``` is just a shorthand which you can also choose for yourself.
+This is required before you can start using the package. `mfl` is a shorthand that you can also choose for yourself.
 
 `alldata = mfl.read_and_bin()`
 >Alternately, use `alldata = mfl.read_and_bin(processes=4)` to load data with multiple CPU cores simultaneously. This does not always work.
@@ -57,4 +57,3 @@ It might be interesting to do a 1D-cut on 1st and 3rd plots, which is done as fo
 `c = p.cut([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2])`
 
 subset parameter can be omitted. `[1, 1, 1]` here is `[h, k, l]` values. `subset=[0, 2]` instead of `[1, 3]` because python index starts with `0`. This generates a cut from \[1, 1, 1\] to \[1.1, 1.1, 1\]. The `cut` method draws a line segment between specified cut start and end points, and each data point corresponding to crossed regions is subsequently projected onto cut axis.
-

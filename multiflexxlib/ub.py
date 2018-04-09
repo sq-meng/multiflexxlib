@@ -24,6 +24,9 @@ def ktoe(k_inv_angstrom):
 class UBMatrix(object):
     """
     UB-matrix handling object. Can be compared to each other using == operator to check if all settings are identical.
+    Example: Hexagonal crystal with a = 4.05A, c = 11.05A, aligned on hkl1 = [1 0 0] and hkl2 = [0 1 0], we want x axis
+    to be [1 1 0] and y axis to be [1 -1 0]
+    UBMatrix([4.05, 4.05, 11.05, 90, 90, 120], [1, 0, 0], [0, 1, 0], [1, 1, 0], [1, -1, 0])
     """
     def __init__(self, latparam, hkl1, hkl2, plot_x=None, plot_y=None):
         """
@@ -204,6 +207,11 @@ class UBMatrix(object):
         return self.__copy__()
 
     def __eq__(self, other):
+        """
+        Check if two UBMatrix objects are the same.
+        :param other: UBMatrix to be checked against
+        :return: bool
+        """
         # type: (UBMatrix) -> bool
         if not isinstance(other, UBMatrix):
             raise TypeError('UBMatrix can only be checked for equality with another UBMatrix.')
