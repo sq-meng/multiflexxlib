@@ -78,13 +78,14 @@ def _nan_int(string):
 def _extract_ki_from_header(en, fx, kfix):
     e_fix = ktoe(kfix)
     if fx == 2:
-        ei = e_fix - en
+        ei = e_fix + en
         return etok(ei)
     elif fx == 1:
-        ei = e_fix + en
+        ei = e_fix - en
         return etok(ei)
     else:
         raise ValueError('Invalid FX value: 2 for fix kf, 1 for fix ki, got %d' % fx)
+
 
 def _parse_flatcone_line(line):
     data = np.array([_nan_int(x) for x in line.split()])
@@ -1131,7 +1132,8 @@ class Plot2D(object):
         cbar.set_label('Normalized intensity (a.u.)')
         self.cbar = cbar
 
-    def set_lognorm(self, vmin=0.01, vmax=1):
+    def set_lognorm(self, vmin=0.01, vmax=1, subset=None):
+        # TODO: Add subset parameter
         """
         Sets Log10 colormap normalization to plot.
         :param vmin: min value. needs to be larger than 0.
@@ -1159,6 +1161,22 @@ class Plot2D(object):
         """
         for p in self.patches:
             p.set_clim((vmin, vmax))
+
+    def set_plim(self, pmin=0, pmax=100):
+        """
+        Sets limits in percentiles, 100 = 100% pencentile
+        :param pmin: min percentile
+        :param pmax: max percentile
+        :return: None
+        """
+        for i in range(len(self.indices)):
+            index = self.indices[i]
+            data = self.data_object.data.loc[index, 'points'].counts_norm
+            data_max = np.max(data)
+            pmin_value = np.percentile(data, pmin, interpolation='lower')
+            pmax_value = np.percentile(data, pmax, interpolation='higher')
+            vmax = pmax_value / data_max
+            self.patches[i].set_clim((0, vmax))
 
     def add_controls(self):
         """
@@ -1436,7 +1454,7 @@ def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expan
 
 def load(file_name=None):
     """
-    Restores dumped binaly pickle to a name.
+    Restores dumped binary pickle to a name.
     :param file_name: Which file to load.
     :return: BinnedData object.
     """

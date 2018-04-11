@@ -7,7 +7,7 @@ requires = ['pyclipper>=1.1.0',
             'scipy>=1.0.0']
 
 setup(name='multiflexxlib',
-      version='0.2.6',
+      version='0.2.8',
       description='Tools library for CAMEA neutron detector MultiFLEXX',
       url='http://github.com/yumemi5k/multiflexxlib',
       author='Siqin Meng',
