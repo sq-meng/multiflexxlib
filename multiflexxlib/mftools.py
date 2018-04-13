@@ -15,6 +15,7 @@ import pyclipper
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
+from matplotlib.collections import PatchCollection
 from matplotlib.colors import LogNorm
 from matplotlib.widgets import Button, TextBox
 from mpl_toolkits.axisartist import Subplot
@@ -35,6 +36,7 @@ except ImportError:
 NUM_CHANNELS = 31
 EF_LIST = [2.5, 3.0, 3.5, 4.0, 4.5]
 CHANNEL_SEPARATION = 2.5
+NORM_FACTOR = [1.0, 1.16, 1.23, 1.30, 1.27]
 
 try:
     DETECTOR_WORKING = np.loadtxt(pkg_resources.resource_filename(__name__, 'res/alive.csv'))
@@ -53,6 +55,7 @@ try:
 except IOError:
     print('Intensity correction matrix not found - assuming all ones.')
     INTENSITY_COEFFICIENT = np.ones(NUM_CHANNELS)
+INTENSITY_COEFFICIENT = INTENSITY_COEFFICIENT / NORM_FACTOR
 
 
 def _nan_float(string):
@@ -618,7 +621,7 @@ class BinnedData(object):
             list_of_lop.append(lop)
         self.data = self.data.assign(voro=list_of_lop)
 
-    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True, bin_tolerance=None):
+    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True, bin_tolerance=None, plot=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
@@ -656,10 +659,12 @@ class BinnedData(object):
             result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr}).sort_values(by='x')
             cut_results.append(result)
         cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
-        cut_object.plot(precision=precision, labels=labels)
+        if plot:
+            cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None):
+    def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None,
+                 plot=True):
         """
         Generate 1D-cuts with rectangular bins.
         :param start: starting point in r.l.u., vector.
@@ -723,8 +728,20 @@ class BinnedData(object):
             bin_polygons = [self.ub_matrix.convert(bins, sys='sp', axis=0)[:, 0:2] for bins in bin_polygons_s]
             list_bin_polygons.append(bin_polygons)
         cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
-        cut_object.plot(precision=precision, labels=labels)
+        if plot:
+            cut_object.plot(precision=precision, labels=labels)
         return cut_object
+
+    def waterfall(self, start, end, en_start=None, en_end=None, no_points=21, reject=None):
+        energies = self.data.en
+        en_cuts = bin_and_cut(energies, tolerance=0.05)
+        multiindex = self.data.groupby(en_cuts)['ef'].nsmallest(1).index
+        try:
+            indices = [ind[1] for ind in multiindex]
+        except TypeError:
+            indices = multiindex
+        c = self.cut_bins(start=start, end=end, subset=indices, no_points=no_points, plot=False)
+        c.vstack()
 
     def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True):
         # type: (..., list, int, float, str, bool) -> 'Plot2D'
@@ -999,6 +1016,33 @@ class ConstECut(object):
         start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
         end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
         ax.set_xlabel('Relative position\n%s to %s' % (start_xlabel, end_xlabel))
+
+    def vstack(self):
+        energies = [self.data_object.data.loc[index, 'en'] for index in self.data_indices]
+        energy_bin_edges = _waterfall_bin_edges(energies)
+        shapes = []
+        values = []
+        for i, cut in enumerate(self.cuts):
+            q_bins = _waterfall_bin_edges(cut.x)
+            e_bin = [energy_bin_edges[i], energy_bin_edges[i+1]]
+            for j in range(len(cut)):
+                shape = mpl_patches.Rectangle((q_bins[j], e_bin[0]), q_bins[j+1] - q_bins[j], e_bin[1] - e_bin[0])
+                shapes.append(shape)
+                values.append(cut.y[j])
+        shape_col = PatchCollection(shapes)
+        shape_col.set_array(np.asarray(values))
+
+        f, ax = plt.subplots(1)
+
+        cut_path = mpl_patches.Rectangle((0, energies[0]), 1, energies[-1] - energies[0], facecolor='None')
+        ax.add_patch(cut_path)
+        shape_col.set_clip_path(cut_path)
+        # patch_poly.set_clip_box([[0, energies[0]], [1, energies[-1]]])
+        ax.add_collection(shape_col)
+        ax.set_xlim(0, 1)
+        ax.set_ylim(energies[0], energies[-1])
+        self.set_axes_labels(ax)
+        ax.set_ylabel('dE (meV)')
 
     def __len__(self):
         return len(self.data_indices)
@@ -1308,6 +1352,15 @@ def _create_grid_helper(shear_coeff):
         return x - y * shear_coeff, y
 
     return GridHelperCurveLinear((tr, inv_tr))
+
+
+def _waterfall_bin_edges(sequence):
+    sequence = list(sequence)
+    bin_edges = [sequence[0] - (sequence[1] - sequence[0]) / 2]
+    for i in range(len(sequence) - 1):
+        bin_edges.append((sequence[i] + sequence[i + 1]) / 2)
+    bin_edges.append(sequence[-1] + (sequence[-1] - sequence[-2]) / 2)
+    return bin_edges
 
 
 def _draw_coverage_mask(ax_handle, locus):
