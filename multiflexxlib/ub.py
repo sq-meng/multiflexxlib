@@ -28,7 +28,7 @@ class UBMatrix(object):
     to be [1 1 0] and y axis to be [1 -1 0]
     UBMatrix([4.05, 4.05, 11.05, 90, 90, 120], [1, 0, 0], [0, 1, 0], [1, 1, 0], [1, -1, 0])
     """
-    def __init__(self, latparam, hkl1, hkl2, plot_x=None, plot_y=None):
+    def __init__(self, latparam, hkl1, hkl2, plot_x=None, plot_y=None, a3_add=0.0, a4_add=0.0):
         """
         Create a UBMatrix object.
         :param latparam: Lattice parameters in list form [a, b, c, alpha, beta, gamma] in Angstroms and degrees.
@@ -53,6 +53,8 @@ class UBMatrix(object):
 
         self.conversion_matrices = None
         self.figure_aspect = None
+        self.a3_add = a3_add
+        self.a4_add = a4_add
         self.update_conversion_matrices()
 
     @property
@@ -170,6 +172,9 @@ class UBMatrix(object):
         len_x = np.linalg.norm(plot_x_s)
         len_y = np.linalg.norm(plot_y_s)
         self.figure_aspect = len_y / len_x
+
+    def angle_to_qs(self, ki, kf, a3, a4):
+        return angle_to_qs(ki, kf, a3, a4, self.a3_add, self.a4_add)
 
     def convert(self, vectors, sys, axis=1):
         """
@@ -331,21 +336,23 @@ def find_triangle_angles(a, b, c):
     return alpha, beta, gamma
 
 
-def angle_to_qs(ki, kf, a3, a4):
+def angle_to_qs(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0):
     """
     # type: (float, float, ...) -> ...
     :param ki: ki, in angstroms^-1
     :param kf: kf, in angstroms^-1
-    :param a3: np.ndarray or list or float of A3 angles
-    :param a4: A4 angles
+    :param a3: np.ndarray or list or float of A3 angles, in degrees
+    :param a4: A4 angles, in degrees.
+    :param a3_add: value to be ADDED to A3, in degrees.
+    :param a4_add: value to be ADDED to A4, in degrees.
     :return: q vectors in S system, 3xN array if input is in iterable form.
     """
     try:
         length = min(len(a3), len(a4))
     except TypeError:
         length = 1
-    a3 = np.array(a3).reshape(1, -1)
-    a4 = np.array(a4).reshape(1, -1)
+    a3 = np.asarray(a3).reshape(1, -1) + a3_add
+    a4 = np.asarray(a4).reshape(1, -1) + a4_add
     ones = np.ones([1, length])
     zeros = np.zeros([1, length])
     initial_vectors = np.vstack([-ones, zeros, zeros])

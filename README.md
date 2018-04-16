@@ -26,7 +26,7 @@ This is required before you can start using the package. `mfl` is a shorthand th
 `alldata = mfl.read_and_bin()`
 >Alternately, use `alldata = mfl.read_and_bin(processes=4)` to load data with multiple CPU cores simultaneously. This does not always work.
 
->UB-matrix and plotting axes will be determined automatically if not provided. x and y axes are scaled to be equal in terms of absolute reciprocal length. Non-orthogonal axes is supported. If lattice parameter or plotting axes is to be overridden from scan files metadata, create a UBMatrix object as follows: `my_ubmatrix = mfl.UBMatrix([a, b, c, alpha, beta, gamma], hkl1, hkl2, plot_x, plot_y)` last 3 elements should be given as 3-element list \[h, k, l\]. Last 2 parameters can be omitted if plot_x == hkl1 and plot_y == hkl2.
+>UB-matrix and plotting axes will be determined automatically if not provided. x and y axes are scaled to be equal in terms of absolute reciprocal length. Non-orthogonal axes is supported. If lattice parameter or plotting axes is to be overridden from scan files metadata, create a UBMatrix object as follows: `my_ubmatrix = mfl.UBMatrix([a, b, c, alpha, beta, gamma], hkl1, hkl2, plot_x, plot_y, a3_add, a4_add)` `hkl1, hkl2, plot_x, plot_y` should be given as 3-element list \[h, k, l\]. `plot_x` and `plot_y` parameters can be omitted if `plot_x == hkl1` and `plot_y == hkl2` `a3_add` and `a4_add` will be ADDED into A3 and A4 angles respectively. Pass this custom `UBMatrix` into `read_and_bin` as `mfl.read_and_bin(ub_matrix=my_ubmatrix)`
 
 You will be asked for a folder containing data like in minimal usage. All data from the folder will be loaded, scans done under identical conditions will be binned together.
 
@@ -56,4 +56,16 @@ It might be interesting to do a 1D-cut on 1st and 3rd plots, which is done as fo
 
 `c = p.cut([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2])`
 
-subset parameter can be omitted. `[1, 1, 1]` here is `[h, k, l]` values. `subset=[0, 2]` instead of `[1, 3]` because python index starts with `0`. This generates a cut from \[1, 1, 1\] to \[1.1, 1.1, 1\]. The `cut` method draws a line segment between specified cut start and end points, and each data point corresponding to crossed regions is subsequently projected onto cut axis.
+This does a cut through Voronoi partition of const-E data. Regions crossed by cut line are picked up and included in the cut. subset parameter can be omitted. `[1, 1, 1]` here is `[h, k, l]` values. `subset=[0, 2]` instead of `[1, 3]` because python index starts with `0`. This generates a cut from \[1, 1, 1\] to \[1.1, 1.1, 1\]. The `cut` method draws a line segment between specified cut start and end points, and each data point corresponding to crossed regions is subsequently projected onto cut axis.
+
+If you have enough data points, it makes more sense to do a traditional cut with rectangular bins:
+
+`c = p.cut([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2], no_points=21, ytol=[0, 0, 0.02])`
+
+Users are strongly recommended to refer to docstring on how to define bin size.
+
+To plot a Q-E dispersion plot:
+
+`df.dispersion([1, 1, 1], [1.1, 1.1, 1], no_points=21)`
+
+This generates a vertical stacking of 1D const-E cuts. It should be noted that data from all final energies is used, thus intensity might zigzag from resolution effects.

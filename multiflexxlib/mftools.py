@@ -313,7 +313,7 @@ class Scan(object):
         data_template.loc[:, ['A3', 'A4', 'MON']] = a3_a4_mon_array
         self.converted_dataframes = [data_template.copy() for _ in range(len(EF_LIST))]
         for ef_channel_num, ef in enumerate(EF_LIST):
-            qs = angle_to_qs(self.ki, etok(ef), a3_a4_mon_array[:, 0], a3_a4_mon_array[:, 1])
+            qs = self.ub_matrix.angle_to_qs(self.ki, etok(ef), a3_a4_mon_array[:, 0], a3_a4_mon_array[:, 1])
             self.converted_dataframes[ef_channel_num].loc[:, ['px', 'py', 'pz']] = self.ub_matrix.convert(qs, 'sp').T
             self.converted_dataframes[ef_channel_num].loc[:, ['h', 'k', 'l']] = self.ub_matrix.convert(qs, 'sr').T
         coefficient = INTENSITY_COEFFICIENT
@@ -732,7 +732,7 @@ class BinnedData(object):
             cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def waterfall(self, start, end, en_start=None, en_end=None, no_points=21, reject=None):
+    def dispersion(self, start, end, en_start=None, en_end=None, no_points=21, reject=None):
         energies = self.data.en
         en_cuts = bin_and_cut(energies, tolerance=0.05)
         multiindex = self.data.groupby(en_cuts)['ef'].nsmallest(1).index
@@ -741,7 +741,7 @@ class BinnedData(object):
         except TypeError:
             indices = multiindex
         c = self.cut_bins(start=start, end=end, subset=indices, no_points=no_points, plot=False)
-        c.vstack()
+        return c.vstack()
 
     def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True):
         # type: (..., list, int, float, str, bool) -> 'Plot2D'
@@ -943,8 +943,8 @@ class ConstECut(object):
         self.figure, self.ax = None, None
         self.artists = None
         self.legend = None
-        self.start_r = start
-        self.end_r = end
+        self.start_r = np.asarray(start)
+        self.end_r = np.asarray(end)
 
     def to_csv(self):
         """
@@ -976,9 +976,10 @@ class ConstECut(object):
             self.artists.append(artist)
         self.legend = ax.legend()
         self.set_axes_labels(ax)
+        self.put_parasite_axis(ax)
         self.figure.tight_layout()
 
-    def inspect(self):
+    def inspect(self, shade=True):
         """
         Generate a graph showing which data points are included in the cuts.
         :return: None
@@ -996,11 +997,12 @@ class ConstECut(object):
             draw_locus_outline(ax_top, locus_p)
             bins_collection = plotting.draw_patches(self.list_bin_polygons[i], mesh=True)
             ax_top.add_collection(bins_collection)
-            ax_top.scatter(x=points.px[indices], y=points.py[indices], c=points.permon[indices], zorder=10, s=12)
-            ax_top.scatter(x=points.px, y=points.py, c=[0.8, 0.8, 0.8], zorder=0, s=8)
+            self.put_parasite_axis(ax_bottom)
+            # self.data_object.draw_voronoi_patch(ax_top, index=self.data_indices[i])
+            if shade:
+                ax_top.scatter(x=points.px[indices], y=points.py[indices], c=points.permon[indices], zorder=10, s=12)
+            ax_top.scatter(x=points.px, y=points.py, c=[0.8, 0.8, 0.8], zorder=0, s=6)
             plotting.draw_line(ax_top, [self.start_r, self.end_r], self.data_object.ub_matrix)
-            title = self.data_object.make_label(index=self.data_indices[i], multiline=False)
-            ax_bottom.set_title(title)
             self.set_axes_labels(ax_bottom)
             ax_bottom.errorbar(cut.x, cut.y, yerr=cut.yerr, fmt='o')
         f.tight_layout()
@@ -1033,7 +1035,6 @@ class ConstECut(object):
         shape_col.set_array(np.asarray(values))
 
         f, ax = plt.subplots(1)
-
         cut_path = mpl_patches.Rectangle((0, energies[0]), 1, energies[-1] - energies[0], facecolor='None')
         ax.add_patch(cut_path)
         shape_col.set_clip_path(cut_path)
@@ -1043,9 +1044,25 @@ class ConstECut(object):
         ax.set_ylim(energies[0], energies[-1])
         self.set_axes_labels(ax)
         ax.set_ylabel('dE (meV)')
+        self.put_parasite_axis(ax)
+        return f, ax
 
     def __len__(self):
         return len(self.data_indices)
+
+    def percentile_to_hkl(self, percentile):
+        return self.start_r + (self.end_r - self.start_r) * percentile
+
+    def _changing_indices(self):
+        delta = self.end_r - self.start_r
+        result = [n for n in range(3) if not np.isclose(delta[n], 0)]
+        return tuple(result)
+
+    def put_parasite_axis(self, ax):
+        ax_p = ax.twiny()
+        fca = self._changing_indices()[0]
+        ax_p.set_xlim(self.start_r[fca], self.end_r[fca])
+        ax_p.set_xlabel(list('HKL')[fca])
 
 
 class Plot2D(object):
@@ -1242,7 +1259,7 @@ class Plot2D(object):
         button.on_clicked(lambda event: self.set_linear())
 
 
-def draw_voronoi_patch(ax, record, mesh=False):
+def draw_voronoi_patch(ax, record, mesh=False, zorder=10):
     """
     Puts down Voronoi representation on axes object
     :param ax: Matplotlib axes object.
@@ -1250,15 +1267,16 @@ def draw_voronoi_patch(ax, record, mesh=False):
     :param mesh: Whether only draw mesh.
     :return: PathCollection
     """
+    #TODO: Check zorder operation
     values = record.points.permon / record.points.permon.max() + 1e-10  # to avoid drawing zero counts as empty
-    v_fill = plotting.draw_patches(record.voro, values, mesh=mesh)
+    v_fill = plotting.draw_patches(record.voro, values, mesh=mesh, zorder=zorder)
     coverage_patch = _draw_coverage_mask(ax, record.locus_a)
     ax.add_collection(v_fill)
     v_fill.set_clip_path(coverage_patch)
     return v_fill
 
 
-def draw_interpolated_patch(ax, record, aspect=1, method='linear'):
+def draw_interpolated_patch(ax, record, aspect=1, method='linear', zorder=10):
     # to avoid drawing zero counts as empty
     values = np.asarray(record.points.permon / record.points.permon.max() + 1e-10)
     px = record.points.px
@@ -1271,20 +1289,20 @@ def draw_interpolated_patch(ax, record, aspect=1, method='linear'):
     signal_grid = interpolate.griddata(np.vstack([px, ay]).T, values, (x_grid, y_grid), method=method, fill_value=0)
     mesh = ax.imshow(flipud(signal_grid.T), cmap='inferno',
                      extent=[x_min, x_max, py_min, py_max],
-                     zorder=10, interpolation='nearest')
+                     zorder=zorder, interpolation='nearest')
     coverage_patch = _draw_coverage_mask(ax, record.locus_a)
     mesh.set_clip_path(coverage_patch)
     return mesh
 
 
-def draw_scatter(ax, record, color=True, colormap='inferno', size=12):
+def draw_scatter(ax, record, color=True, colormap='inferno', size=12, zorder=10):
     if color:
         values = np.asarray(record.points.permon / record.points.permon.max() + 1e-10)
     else:
         values = 0
     px = record.points.px
     py = record.points.py
-    s = ax.scatter(x=px, y=py, c=values, cmap=colormap, s=size)
+    s = ax.scatter(x=px, y=py, c=values, cmap=colormap, s=size, zorder=zorder)
     return s
 
 
