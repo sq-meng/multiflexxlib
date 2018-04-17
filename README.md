@@ -69,3 +69,9 @@ To plot a Q-E dispersion plot:
 `df.dispersion([1, 1, 1], [1.1, 1.1, 1], no_points=21)`
 
 This generates a vertical stacking of 1D const-E cuts. It should be noted that data from all final energies is used, thus intensity might zigzag from resolution effects.
+
+To export all data into CSV files:
+
+`df.to_csv()`
+
+This writes a series of CSV files into folder containing source scan files.

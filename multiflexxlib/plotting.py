@@ -7,13 +7,13 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
 
 
-def generate_vpatch(x, y=None, aspect=1, angle_mode=False):
+def generate_vpatch(x, y=None, aspect=1, max_cell=0.1):
     # type: (...) -> list
     """
     :param x: 1-D list or np.array: x coordinates on a 2-D plane.
     :param y: 1-D list or np.array: y coordinates on a 2-D plane.
     :param aspect: aspect correction, larger value means each unit of y has greater absolute length.
-    :param angle_mode: Not implemented.
+    :param max_cell: Max size of rectangular bounding box.
     :return:
     """
     if aspect is None:
@@ -24,15 +24,14 @@ def generate_vpatch(x, y=None, aspect=1, angle_mode=False):
         x = x[:, 0]
     x = np.asarray(x).ravel()
     y = np.asarray(y).ravel()
-    if not angle_mode:
-        y = y.copy() * aspect
+    y = y.copy() * aspect
 
     if x.shape != y.shape:
         raise TypeError('input data shape mismatch in Voronoi patch calculation.')
 
     xy = np.vstack((x, y)).T
-    xmin, xmax = x.min() - 0.1, x.max() + 0.1
-    ymin, ymax = y.min() - 0.1, y.max() + 0.1
+    xmin, xmax = x.min() - max_cell, x.max() + max_cell
+    ymin, ymax = y.min() - max_cell, y.max() + max_cell
     bbox = np.array([[xmin, ymin], [xmin, ymax], [xmax, ymin], [xmax, ymax]])
     xy_padded = np.vstack((xy, bbox))
     vor = Voronoi(xy_padded)
@@ -42,9 +41,15 @@ def generate_vpatch(x, y=None, aspect=1, angle_mode=False):
         region_index = vor.point_region[i]
         vertices_indexes = vor.regions[region_index]
         patch_vert_coords = [vor.vertices[vert_no] for vert_no in vertices_indexes]
-        patch_vert_coords_array = np.array(patch_vert_coords)
-        patch_vert_coords_array[:, 1] = patch_vert_coords_array[:, 1] / aspect
-        list_of_polygons.append(patch_vert_coords_array)
+        pvca = np.array(patch_vert_coords) # patch_vert_coords_array
+        x_min, x_max = x[i] - max_cell, x[i] + max_cell
+        y_min, y_max = y[i] - max_cell, y[i] + max_cell
+        pvca[pvca[:, 0] < x_min, 0] = x_min
+        pvca[pvca[:, 0] > x_max, 0] = x_max
+        pvca[pvca[:, 1] < y_min, 1] = y_min
+        pvca[pvca[:, 1] > y_max, 1] = y_max
+        pvca[:, 1] = pvca[:, 1] / aspect
+        list_of_polygons.append(pvca)
 
     return list_of_polygons
 

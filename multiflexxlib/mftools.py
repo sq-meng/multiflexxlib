@@ -193,7 +193,7 @@ class Scan(object):
     Reads a TASMAD scan file, extracts metadata and do essential conversions. Assumes const-Ei scan!
     Should not be instantiated by directly invoking constructor. Use read_mf_scan() or read_mf_scans() instead.
     """
-    def __init__(self, file_name, ub_matrix=None, intensity_matrix=None):
+    def __init__(self, file_name, ub_matrix=None, intensity_matrix=None, a3_offset=0.0, a4_offset=0.0):
         """
         Scan object.
         :param file_name: File name of TASMAD scan file.
@@ -203,6 +203,9 @@ class Scan(object):
         f = open(file_name)
         self.header, self.data = parse_ill_data(f)
         self.file_name = os.path.abspath(file_name)
+        self.a3_offset = a3_offset
+        self.a4_offset = a4_offset
+        self._apply_offsets()
         if 'flat' not in self.data.columns:
             raise AttributeError('%s does not contain flatcone data.' % file_name)
         elif 'A3' not in self.header['STEPS'].keys():
@@ -290,6 +293,10 @@ class Scan(object):
         self.actual_locus_list = [calculate_locus(self.ki, kf, a3_start, a3_end_actual, a4_start, a4_end_actual,
                                                   self.ub_matrix) for kf in kf_list]
 
+    def _apply_offsets(self):
+        self.data.A3 = self.data.A3 + self.a3_offset
+        self.data.A4 = self.data.A4 + self.a4_offset
+
     def _populate_data_array(self):
         num_ch = NUM_CHANNELS
         channel_separation = CHANNEL_SEPARATION
@@ -334,20 +341,22 @@ class Scan(object):
         a3_start = self.data.iloc[0]['A3']
         a3_end_actual = self.data.iloc[-1]['A3']
         try:
-            a3_end_planned = self.header['VARIA']['A3'] + self.header['STEPS']['A3'] * (self.header['COMND']['NP'] - 1)
+            a3_end_planned = self.header['VARIA']['A3'] + \
+                             self.header['STEPS']['A3'] * (self.header['COMND']['NP'] - 1) + self.a3_offset
         except KeyError:
             a3_end_planned = a3_end_actual
 
-        a4_start = self.header['VARIA']['A4']  # A4 is not necessarily outputted in data
+        a4_start = self.header['VARIA']['A4'] + self.a4_offset  # A4 is not necessarily outputted in data
         if 'A4' not in self.header['STEPS']:
             a4_end_planned = a4_start
             a4_end_actual = a4_start
         else:
-            a4_end_planned = self.header['VARIA']['A4'] + self.header['STEPS']['A4'] * (self.header['COMND']['NP'] - 1)
+            a4_end_planned = self.header['VARIA']['A4'] + \
+                             self.header['STEPS']['A4'] * (self.header['COMND']['NP'] - 1) + self.a4_offset
             a4_end_actual = self.data.iloc[-1]['A4']
 
-        self.a3_ranges = (a3_start, a3_end_actual, a3_end_planned)
-        self.a4_ranges = (a4_start, a4_end_actual, a4_end_planned)
+        self.a3_ranges = [a3_start, a3_end_actual, a3_end_planned]
+        self.a4_ranges = [a4_start, a4_end_actual, a4_end_planned]
 
     def to_csv(self, file_name=None, channel=None):
         pass
@@ -388,7 +397,7 @@ def _merge_locus(locus_list):
     return merged_locus
 
 
-def _merge_scan_points(data_frames, angle_tolerance=0.2):
+def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2):
     """
     Bins actual detector counts together from multiple runs.
     :param data_frames: Pandas data frames from Scan objects.
@@ -399,8 +408,8 @@ def _merge_scan_points(data_frames, angle_tolerance=0.2):
     joined_frames = joined_frames.assign(counts_norm=joined_frames.counts/joined_frames.coeff)
     joined_frames = joined_frames.drop(joined_frames[joined_frames.valid != 1].index)  # delete dead detectors
 
-    a3_cuts = bin_and_cut(joined_frames.A3, tolerance=angle_tolerance)
-    a4_cuts = bin_and_cut(joined_frames.A4, tolerance=angle_tolerance)
+    a3_cuts = bin_and_cut(joined_frames.A3, tolerance=a3_tolerance)
+    a4_cuts = bin_and_cut(joined_frames.A4, tolerance=a4_tolerance)
     group = joined_frames.groupby([a3_cuts, a4_cuts])
     sums = group['counts', 'counts_norm', 'MON'].sum()
     means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
@@ -438,7 +447,8 @@ def series_to_binder(items):
 
 def bin_scans(list_of_data,  # type: ['Scan']
               nan_fill=0, ignore_ef=False,
-              en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, angle_tolerance=0.2):
+              en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, a3_tolerance=0.2, a4_tolerance=0.2,
+              angle_voronoi=False):
     # type: (...)-> BinnedData
     """
     Bin raw Scan objects into BinnedData object.
@@ -448,7 +458,9 @@ def bin_scans(list_of_data,  # type: ['Scan']
     :param en_tolerance: Energy binning tolerance.
     :param tt_tolerance: Temperature binning tolerance.
     :param mag_tolerance: Magnetic field binning tolerance.
-    :param angle_tolerance: Angle binning tolerance of data points.
+    :param a3_tolerance: A3 angle binning tolerance of data points.
+    :param a4_tolerance: A4 angle binning tolerance of data points.
+    :param angle_voronoi: Performs Voronoi partition in angle plane instead of reciprocal plane.
     :return: BinnedData object.
     """
     all_data = pd.DataFrame(index=range(len(list_of_data) * len(EF_LIST)),
@@ -475,30 +487,34 @@ def bin_scans(list_of_data,  # type: ['Scan']
     else:
         grouped = all_data.groupby([cut_ei, cut_en, cut_tt, cut_mag])
     grouped_meta = grouped['ei', 'ef', 'en', 'tt', 'mag'].mean()
-    grouped_data = grouped['points'].apply(series_to_binder).apply(lambda x: _MergedDataPoints(x, angle_tolerance))
+    grouped_data = grouped['points'].apply(series_to_binder).apply(lambda x:
+                                                                   _MergedDataPoints(x, a3_tolerance, a4_tolerance))
 
     grouped_locus_a = grouped['locus_a'].apply(series_to_binder).apply(_MergedLocus)
     grouped_locus_p = grouped['locus_p'].apply(series_to_binder).apply(_MergedLocus)
     joined = pd.concat([grouped_meta, grouped_data, grouped_locus_a, grouped_locus_p], axis=1)
     index_reset = joined.dropna().reset_index(drop=True)
-    return BinnedData(index_reset, file_names=file_names, ub_matrix=list_of_data[0].ub_matrix)
+    return BinnedData(index_reset, file_names=file_names, ub_matrix=list_of_data[0].ub_matrix,
+                      angle_voronoi=angle_voronoi)
 
 
-def read_mf_scan(filename, ub_matrix=None, intensity_matrix=None):
+def read_mf_scan(filename, ub_matrix=None, intensity_matrix=None, a3_offset=0.0, a4_offset=0.0):
     # type: (str, UBMatrix, np.ndarray) -> Scan
     """
     Reads TASMAD scan files.
     :param filename: TASMAD file name to read.
     :param ub_matrix: UBMatrix to be used. Omit to generate automatically.
     :param intensity_matrix: Int. matrix to use. Omit to use default.
+    :param a3_offset: Value to be added to A3 angles in this scan file.
+    :param a4_offset: Value to be added to A4 angles in this scan file.
     :return: Scan object
     """
-    scan_object = Scan(filename, ub_matrix, intensity_matrix)
+    scan_object = Scan(filename, ub_matrix, intensity_matrix, a3_offset=a3_offset, a4_offset=a4_offset)
     return scan_object
 
 
 def read_mf_scans(filename_list=None,  # type: ['str']
-                  ub_matrix=None, intensity_matrix=None, processes=1):
+                  ub_matrix=None, intensity_matrix=None, processes=1, a3_offset=None, a4_offset=None):
     """
     # type: (...) -> ['Scan']
     Reads TASMAD scan files.
@@ -506,6 +522,10 @@ def read_mf_scans(filename_list=None,  # type: ['str']
     :param ub_matrix: UBMatrix to be used. Omit to generate automatically.
     :param intensity_matrix: Int. matrix to use. Omit to use default.
     :param processes: Number of processes.
+    :param a3_offset: Number, list or None. Will be added to A3 angles if provided. Each element will be added to
+    corresponding scan file if a list is provided. List length must match number of files.
+    :param a4_offset: Number, list or None. Will be added to A4 angles if provided. Each element will be added to
+    corresponding scan file if a list is provided. List length must match number of files.
     :return: A list containing resulting Scan objects.
     """
     if filename_list is None:
@@ -513,9 +533,12 @@ def read_mf_scans(filename_list=None,  # type: ['str']
         filename_list = list_flexx_files(path)
     if len(filename_list) == 0:
         raise FileNotFoundError('No file to read.')
+
+    a3_offset_list = _expand_offset_parameter(a3_offset, len(filename_list))
+    a4_offset_list = _expand_offset_parameter(a4_offset, len(filename_list))
     arg_list = []
-    for name in filename_list:
-        arg_list.append((name, ub_matrix, intensity_matrix))
+    for name, a3o, a4o in zip(filename_list, a3_offset_list, a4_offset_list):
+        arg_list.append((name, ub_matrix, intensity_matrix, a3o, a4o))
     if processes > 1:
         pool = mp.Pool(processes=processes)
         data_list = pool.starmap(read_mf_scan, arg_list)
@@ -524,8 +547,27 @@ def read_mf_scans(filename_list=None,  # type: ['str']
     return data_list
 
 
+def _expand_offset_parameter(param, length):
+    if param is None:
+        return [0.0 for _ in range(length)]
+    else:
+        try:
+            len_param = len(param)
+            if len_param == length:
+                return param  # received an iterable with length matching file list.
+            else:
+                raise ValueError('Offset list with length %d not matching number of files %d' % (len_param, length))
+        except TypeError:
+            pass
+        if isinstance(param, (int, float)):
+            return [param for _ in range(length)]
+        else:
+            raise TypeError('Offset has to be an iterable, a number or None')
+
+
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
-                 en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, angle_tolerance=0.2):
+                 en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, a3_tolerance=0.2, a4_tolerance=0.2,
+                 a3_offset=None, a4_offset=None, angle_voronoi=False):
     """
     Reads and bins MultiFLEXX scan files together.
     :param filename_list: A list containing absolute or relative paths of TASMAD scan files to read. User will be
@@ -536,21 +578,25 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
     :param en_tolerance: Energy tolerance before two values are considered discrete, default to 0.05meV.
     :param tt_tolerance: Temperature tolerance, default to 1.0K.
     :param mag_tolerance: Magnetic field tolerance, default to 0.05T.
-    :param angle_tolerance: A3 and A4 angle tolerance, default is 0.2deg.
+    :param a3_tolerance: A3 angle tolerance, default is 0.2deg.
+    :param a4_tolerance: A4 angle tolerance, default is 0.2deg.
+    :param a3_offset: Angle value to be added into raw A3 angles, in degrees.
+    :param a4_offset: Angle value to be added into raw A4 angles, in degrees.
+    :param angle_voronoi: Whether to perform Voronoi tessellation in angles instead of Q-coordinates.
     :return: BinnedData object.
     """
     if filename_list is None:
-        items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+        items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes, a3_offset, a4_offset)
     else:
         if isinstance(filename_list, list):
-            items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+            items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes, a3_offset, a4_offset)
         elif os.path.isdir(filename_list):
             filename_list = list_flexx_files(filename_list)
-            items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes)
+            items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes, a3_offset, a4_offset)
         else:
             raise ValueError('%s: Got a parameter that is neither a list nor a directory')
     df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance,
-                   angle_tolerance=angle_tolerance)
+                   a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance, angle_voronoi=angle_voronoi)
     return df
 
 
@@ -579,9 +625,9 @@ class _MergedLocus(list):
 
 class _MergedDataPoints(pd.DataFrame):
     # Helper class to override __str__ behaviour.
-    def __init__(self, items, angle_tolerance=0.2):
+    def __init__(self, items, a3_tolerance=0.2, a4_tolerance=0.2):
         # type: (_DataBinder, float) -> None
-        binned_points = _merge_scan_points(items, angle_tolerance=angle_tolerance)
+        binned_points = _merge_scan_points(items, a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance)
         super(_MergedDataPoints, self).__init__(binned_points)
 
     def __str__(self):
@@ -589,7 +635,7 @@ class _MergedDataPoints(pd.DataFrame):
 
 
 class BinnedData(object):
-    def __init__(self, source_dataframe, file_names, ub_matrix=None):
+    def __init__(self, source_dataframe, file_names, ub_matrix=None, angle_voronoi=False):
         # type: (pd.DataFrame, [str], UBMatrix) -> None
         """
         Should not be instantiated on its own.
@@ -600,7 +646,8 @@ class BinnedData(object):
         self._file_names = file_names
         self.data = source_dataframe
         self.ub_matrix = ub_matrix
-        self._generate_voronoi()
+        self._generate_voronoi(angle_voronoi)
+        self.angle_voronoi = angle_voronoi
 
     def file_names(self):
         """
@@ -613,15 +660,26 @@ class BinnedData(object):
         return str(pd.concat((self.data[['ei', 'en', 'ef', 'tt', 'mag']],
                               self.data[['locus_a', 'locus_p', 'points']].astype('str')), axis=1))
 
-    def _generate_voronoi(self):
+    def _generate_voronoi(self, angle_voronoi):
         # TODO: defuse this iterator landmine: is this iterating through index column or what?
-        list_of_lop = []
-        for i, item in enumerate(self.data['points']):
-            lop = plotting.generate_vpatch(item['px'], item['py'], self.ub_matrix.figure_aspect)
-            list_of_lop.append(lop)
-        self.data = self.data.assign(voro=list_of_lop)
+        if not angle_voronoi:
+            list_of_lop = []
+            for i, item in enumerate(self.data['points']):
+                lop = plotting.generate_vpatch(item['px'], item['py'], self.ub_matrix.figure_aspect, max_cell=0.2)
+                list_of_lop.append(lop)
+            self.data = self.data.assign(voro=list_of_lop)
+        else:
+            list_of_lop = []
+            for i, item in enumerate(self.data['points']):
+                lop_angle = plotting.generate_vpatch(item['A3'], item['A4'], self.ub_matrix.figure_aspect, max_cell=2.5)
+                lop_s = [self.ub_matrix.angle_to_qs(etok(self.data.ei[i]), etok(self.data.ef[i]),
+                                                    poly[:, 0], poly[:, 1]) for poly in lop_angle]
+                lop_p = [self.ub_matrix.convert(poly, 'sp') for poly in lop_s]
+                lop_p_filtered = [poly.T[:, 0:2] for poly in lop_p]
+                list_of_lop.append(lop_p_filtered)
+            self.data = self.data.assign(voro=list_of_lop)
 
-    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True, bin_tolerance=None, plot=True):
+    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True, plot=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
@@ -630,7 +688,6 @@ class BinnedData(object):
         :param precision: refer to make_label method.
         :param labels: refer to make_label method.
         :param monitor: if normalize by monitor count.
-        :param bin_tolerance: re-binning tolerance.
         :return: ECut object.
         """
         start_p = self.ub_matrix.convert(start, 'rp')[0:2]
@@ -675,6 +732,7 @@ class BinnedData(object):
         :param no_points: Number of bins along cutting axis.
         :param precision: refer to make_label method.
         :param labels: refer to make_label method.
+        :param plot: Automatically spawns a plot if true.
         :return: ConstECut object.
         """
         # Find absolute tolerances
@@ -720,7 +778,8 @@ class BinnedData(object):
             coords_p = group['px', 'py', 'pz'].mean().dropna()
             coords_s = self.ub_matrix.convert(coords_p, 'ps', axis=0)
             projections = plotting.projection_on_segment(coords_s, np.vstack((start_s, end_s)))
-            cut_result = pd.DataFrame({'x': projections, 'y': counts_permon, 'yerr': yerr}).dropna().reset_index(drop=True)
+            cut_result = pd.DataFrame({'x': projections, 'y': counts_permon, 'yerr': yerr})\
+                .dropna().reset_index(drop=True)
             indices = pd_cut[0].dropna().index.intersection(pd_cut[1].dropna().index)
             cut_results.append(cut_result)
             point_indices.append(indices)
@@ -732,7 +791,7 @@ class BinnedData(object):
             cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def dispersion(self, start, end, en_start=None, en_end=None, no_points=21, reject=None):
+    def dispersion(self, start, end, no_points=21):
         energies = self.data.en
         en_cuts = bin_and_cut(energies, tolerance=0.05)
         multiindex = self.data.groupby(en_cuts)['ef'].nsmallest(1).index
@@ -1236,8 +1295,10 @@ class Plot2D(object):
             data_max = np.max(data)
             pmin_value = np.percentile(data, pmin, interpolation='lower')
             pmax_value = np.percentile(data, pmax, interpolation='higher')
+            vmin = pmin_value / data_max
             vmax = pmax_value / data_max
-            self.patches[i].set_clim((0, vmax))
+
+            self.patches[i].set_clim((vmin, vmax))
 
     def add_controls(self):
         """
@@ -1265,9 +1326,10 @@ def draw_voronoi_patch(ax, record, mesh=False, zorder=10):
     :param ax: Matplotlib axes object.
     :param record: A row in BinnedData.data
     :param mesh: Whether only draw mesh.
+    :param zorder: zorder to be used for artist.
     :return: PathCollection
     """
-    #TODO: Check zorder operation
+    # TODO: Check zorder operation
     values = record.points.permon / record.points.permon.max() + 1e-10  # to avoid drawing zero counts as empty
     v_fill = plotting.draw_patches(record.voro, values, mesh=mesh, zorder=zorder)
     coverage_patch = _draw_coverage_mask(ax, record.locus_a)
@@ -1415,7 +1477,10 @@ def list_flexx_files(path):
     :param path: Source path.
     :return: A list of file names.
     """
+    if path == '':
+        raise ValueError('Path \'%s\' is invalid.' % path)
     file_names = [os.path.join(path, s) for s in os.listdir(path) if (s.isdigit() and len(s) == 6)]
+    file_names.sort(key=lambda fn: int(os.path.split(fn)[1]))
     return file_names
 
 
