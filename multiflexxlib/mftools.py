@@ -90,6 +90,15 @@ def _extract_ki_from_header(en, fx, kfix):
         raise ValueError('Invalid FX value: 2 for fix kf, 1 for fix ki, got %d' % fx)
 
 
+def _number_to_scan(num):
+    if isinstance(num, int):
+        return '{:06d}'.format(num)
+    elif isinstance(num, str):
+        return num
+    else:
+        raise TypeError('Expecting a number or a numeric string to convert to FLEXX scan file number.')
+
+
 def _parse_flatcone_line(line):
     data = np.array([_nan_int(x) for x in line.split()])
     array = np.reshape(data, (-1, len(EF_LIST)))[0: -1, :]  # throws out last line which is only artifact
@@ -200,12 +209,13 @@ class Scan(object):
         :param ub_matrix: UBMatrix object to be used. Omit to generate from file header.
         :param intensity_matrix: Intensity correction matrix to be used. Omit to use default.
         """
+        file_name = _number_to_scan(file_name)
         f = open(file_name)
         self.header, self.data = parse_ill_data(f)
         self.file_name = os.path.abspath(file_name)
-        self.a3_offset = a3_offset
-        self.a4_offset = a4_offset
-        self._apply_offsets()
+        self._a3_offset = a3_offset
+        self._a4_offset = a4_offset
+        self._apply_offsets(a3_offset, a4_offset)
         if 'flat' not in self.data.columns:
             raise AttributeError('%s does not contain flatcone data.' % file_name)
         elif 'A3' not in self.header['STEPS'].keys():
@@ -222,33 +232,37 @@ class Scan(object):
         else:
             self.ub_matrix = ub_matrix
 
+        self.converted_dataframes = []
+        self._update_data_array()
+        print('finished loading %s, a3_offset = %.2f, a4_offset = %.2f' % (file_name, self.a3_offset, self.a4_offset))
+
+    @property
+    def ki(self):
         try:
-            self.ki = self.data.iloc[0]['KI']
+            ki = self.data.iloc[0]['KI']
         except KeyError:
             try:
-                self.ki = etok(self.data.iloc[0]['EI'])
+                ki = etok(self.data.iloc[0]['EI'])
             except KeyError:
-                # raise KeyError('File %s records neither ki nor Ei.' % self.file_name)
-                self.ki = _extract_ki_from_header(self.header['POSQE']['EN'], self.header['PARAM']['FX'],
-                                                  self.header['PARAM']['KFIX'])
+                ki = _extract_ki_from_header(self.header['POSQE']['EN'], self.header['PARAM']['FX'],
+                                             self.header['PARAM']['KFIX'])
+        return ki
 
-        self.a3_ranges, self.a4_ranges = None, None
-        self._update_scan_ranges()
+    @property
+    def tt(self):
         try:
-            self.tt = self.data.iloc[-1]['TT']  # takes final value as signature value for the scan
+            tt = self.data.iloc[-1]['TT']  # takes final value as signature value for the scan
         except KeyError:
-            self.tt = None
+            tt = None
+        return tt
 
+    @property
+    def mag(self):
         try:
-            self.mag = self.data.iloc[-1]['MAG']
+            mag = self.data.iloc[-1]['MAG']
         except KeyError:
-            self.mag = None
-
-        self.planned_locus_list, self.actual_locus_list = None, None
-        self._update_locus()
-        self.converted_dataframes = []
-        self._populate_data_array()
-        print('finished loading %s' % file_name)
+            mag = None
+        return mag
 
     @property
     def ei(self):
@@ -282,22 +296,53 @@ class Scan(object):
         """
         return os.path.split(self.file_name)[1]
 
-    def _update_locus(self):
-        self.planned_locus_list = []
-        self.actual_locus_list = []
+    @property
+    def a3_offset(self):
+        return self._a3_offset
+
+    @property
+    def a4_offset(self):
+        return self._a4_offset
+
+    @a3_offset.setter
+    def a3_offset(self, value):
+        a3o_old = self.a3_offset
+        a3o_new = value
+        a3_add = a3o_new - a3o_old
+        self._apply_offsets(a3_add, 0.0)
+        self._update_data_array()
+        self._a3_offset = a3o_new
+
+    @a4_offset.setter
+    def a4_offset(self, value):
+        a4o_old = self.a3_offset
+        a4o_new = value
+        a4_add = a4o_new - a4o_old
+        self._apply_offsets(0.0, a4_add)
+        self._update_data_array()
+        self._a4_offset = a4o_new
+
+    @property
+    def planned_locus_list(self):
         kf_list = [etok(e) for e in EF_LIST]
         a3_start, a3_end_actual, a3_end_planned = self.a3_ranges
         a4_start, a4_end_actual, a4_end_planned = self.a4_ranges
-        self.planned_locus_list = [calculate_locus(self.ki, kf, a3_start, a3_end_planned, a4_start, a4_end_planned,
-                                                   self.ub_matrix, expand_a3=True) for kf in kf_list]
-        self.actual_locus_list = [calculate_locus(self.ki, kf, a3_start, a3_end_actual, a4_start, a4_end_actual,
-                                                  self.ub_matrix) for kf in kf_list]
+        return [calculate_locus(self.ki, kf, a3_start, a3_end_planned, a4_start, a4_end_planned,
+                                self.ub_matrix, expand_a3=True) for kf in kf_list]
 
-    def _apply_offsets(self):
-        self.data.A3 = self.data.A3 + self.a3_offset
-        self.data.A4 = self.data.A4 + self.a4_offset
+    @property
+    def actual_locus_list(self):
+        kf_list = [etok(e) for e in EF_LIST]
+        a3_start, a3_end_actual, a3_end_planned = self.a3_ranges
+        a4_start, a4_end_actual, a4_end_planned = self.a4_ranges
+        return [calculate_locus(self.ki, kf, a3_start, a3_end_actual, a4_start, a4_end_actual,
+                                self.ub_matrix) for kf in kf_list]
 
-    def _populate_data_array(self):
+    def _apply_offsets(self, a3_offset, a4_offset):
+        self.data.A3 = self.data.A3 + a3_offset
+        self.data.A4 = self.data.A4 + a4_offset
+
+    def _update_data_array(self):
         num_ch = NUM_CHANNELS
         channel_separation = CHANNEL_SEPARATION
         num_flat_frames = len(self.data)
@@ -337,26 +382,28 @@ class Scan(object):
                 dataframe.loc[rows, 'ach'] = range(1, num_ch + 1)
                 # dataframe.loc[rows, 'file'] = self.file_name
 
-    def _update_scan_ranges(self):
+    @property
+    def a3_ranges(self):
         a3_start = self.data.iloc[0]['A3']
         a3_end_actual = self.data.iloc[-1]['A3']
         try:
             a3_end_planned = self.header['VARIA']['A3'] + \
-                             self.header['STEPS']['A3'] * (self.header['COMND']['NP'] - 1) + self.a3_offset
+                             self.header['STEPS']['A3'] * (self.header['COMND']['NP'] - 1) + self._a3_offset
         except KeyError:
             a3_end_planned = a3_end_actual
+        return a3_start, a3_end_actual, a3_end_planned
 
-        a4_start = self.header['VARIA']['A4'] + self.a4_offset  # A4 is not necessarily outputted in data
+    @property
+    def a4_ranges(self):
+        a4_start = self.header['VARIA']['A4'] + self._a4_offset  # A4 is not necessarily outputted in data
         if 'A4' not in self.header['STEPS']:
             a4_end_planned = a4_start
             a4_end_actual = a4_start
         else:
             a4_end_planned = self.header['VARIA']['A4'] + \
-                             self.header['STEPS']['A4'] * (self.header['COMND']['NP'] - 1) + self.a4_offset
+                             self.header['STEPS']['A4'] * (self.header['COMND']['NP'] - 1) + self._a4_offset
             a4_end_actual = self.data.iloc[-1]['A4']
-
-        self.a3_ranges = [a3_start, a3_end_actual, a3_end_planned]
-        self.a4_ranges = [a4_start, a4_end_actual, a4_end_planned]
+        return a4_start, a4_end_actual, a4_end_planned
 
     def to_csv(self, file_name=None, channel=None):
         pass
@@ -534,8 +581,8 @@ def read_mf_scans(filename_list=None,  # type: ['str']
     if len(filename_list) == 0:
         raise FileNotFoundError('No file to read.')
 
-    a3_offset_list = _expand_offset_parameter(a3_offset, len(filename_list))
-    a4_offset_list = _expand_offset_parameter(a4_offset, len(filename_list))
+    a3_offset_list = _expand_offset_parameter(a3_offset, filename_list)
+    a4_offset_list = _expand_offset_parameter(a4_offset, filename_list)
     arg_list = []
     for name, a3o, a4o in zip(filename_list, a3_offset_list, a4_offset_list):
         arg_list.append((name, ub_matrix, intensity_matrix, a3o, a4o))
@@ -547,22 +594,29 @@ def read_mf_scans(filename_list=None,  # type: ['str']
     return data_list
 
 
-def _expand_offset_parameter(param, length):
+def _expand_offset_parameter(param, filename_list):
+    length = len(filename_list)
     if param is None:
         return [0.0 for _ in range(length)]
-    else:
-        try:
-            len_param = len(param)
-            if len_param == length:
-                return param  # received an iterable with length matching file list.
-            else:
-                raise ValueError('Offset list with length %d not matching number of files %d' % (len_param, length))
-        except TypeError:
-            pass
-        if isinstance(param, (int, float)):
+    elif isinstance(param, (int, float)):
             return [param for _ in range(length)]
+    elif isinstance(param, (list, tuple)):
+        if len(filename_list) == len(param):
+            return param
         else:
-            raise TypeError('Offset has to be an iterable, a number or None')
+            raise ValueError('Offset list length and number of files mismatch.')
+    elif isinstance(param, dict):
+        param_filtered = {_number_to_scan(key): param[key] for key in param.keys()}
+        offset_list = []
+        for filename in filename_list:
+            filename = os.path.split(filename)[1]
+            try:
+                offset_list.append(param_filtered[filename])
+            except KeyError:
+                offset_list.append(0.0)
+        return offset_list
+    else:
+        raise TypeError('Offset should be None, a number, a list or a dict.')
 
 
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
@@ -679,7 +733,7 @@ class BinnedData(object):
                 list_of_lop.append(lop_p_filtered)
             self.data = self.data.assign(voro=list_of_lop)
 
-    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True, plot=True):
+    def cut_voronoi(self, start, end, subset=None, precision=2, labels=None, monitor=True, plot=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
@@ -1080,11 +1134,11 @@ class ConstECut(object):
 
     def vstack(self):
         energies = [self.data_object.data.loc[index, 'en'] for index in self.data_indices]
-        energy_bin_edges = _waterfall_bin_edges(energies)
+        energy_bin_edges = _dispersion_bin_edges(energies)
         shapes = []
         values = []
         for i, cut in enumerate(self.cuts):
-            q_bins = _waterfall_bin_edges(cut.x)
+            q_bins = _dispersion_bin_edges(cut.x)
             e_bin = [energy_bin_edges[i], energy_bin_edges[i+1]]
             for j in range(len(cut)):
                 shape = mpl_patches.Rectangle((q_bins[j], e_bin[0]), q_bins[j+1] - q_bins[j], e_bin[1] - e_bin[0])
@@ -1209,7 +1263,7 @@ class Plot2D(object):
             subset = self.indices
         else:
             subset = [self.indices[x] for x in subset]
-        cut_obj = self.data_object.cut(start, end, subset, precision, labels, monitor)
+        cut_obj = self.data_object.cut_voronoi(start, end, subset, precision, labels, monitor)
         return cut_obj
 
     def update_label(self, index, labels, precision=2):
@@ -1434,7 +1488,7 @@ def _create_grid_helper(shear_coeff):
     return GridHelperCurveLinear((tr, inv_tr))
 
 
-def _waterfall_bin_edges(sequence):
+def _dispersion_bin_edges(sequence):
     sequence = list(sequence)
     bin_edges = [sequence[0] - (sequence[1] - sequence[0]) / 2]
     for i in range(len(sequence) - 1):
