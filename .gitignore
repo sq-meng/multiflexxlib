@@ -12,3 +12,6 @@
 
 # py.test cache
 /.cache/
+
+# stuff only used for paper
+/paper/

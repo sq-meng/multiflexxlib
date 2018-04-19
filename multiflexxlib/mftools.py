@@ -409,30 +409,49 @@ class Scan(object):
         pass
 
 
-def make_bin_edges(values, tolerance=0.2):
+def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
     # type: ((list, pd.Series), float) -> list
     """
     :param values: An iterable list of all physical quantities, repetitions allowed.
     :param tolerance: maximum difference in value for considering two points to be the same.
+    :param strategy:
     :return: a list of bin edges
 
     Walks through sorted unique values, if a point is further than tolerance away from the next, a bin edge is
     dropped between the two points, otherwise no bin edge is added. A beginning and ending edge is added at
     tolerance / 2 further from either end.
     """
-    values_array = np.array(values).ravel()
-    unique_values = np.asarray(list(set(values_array)))
-    unique_values.sort()
-    bin_edges = [unique_values[0] - tolerance / 2]
-    for i in range(len(unique_values) - 1):
-        if unique_values[i+1] - unique_values[i] > tolerance:
-            bin_edges.append((unique_values[i] + unique_values[i+1]) / 2)
+    if isinstance(strategy, str):
+        if strategy == 'adaptive':
+            values_array = np.array(values).ravel()
+            unique_values = np.asarray(list(set(values_array)))
+            unique_values.sort()
+            bin_edges = [unique_values[0] - tolerance / 2]
+            current_walk = 0
+            for i in range(len(unique_values) - 1):
+                if unique_values[i+1] - unique_values[i] > tolerance:
+                    bin_edges.append((unique_values[i] + unique_values[i+1]) / 2)
+                    current_walk = 0
+                else:
+                    current_walk = current_walk + unique_values[i+1] - unique_values[i]
+                if current_walk > tolerance:
+                    raise ValueError('Bin edge creation failed due to diffuse clustering of values.')
+
+            bin_edges.append(unique_values[-1] + tolerance / 2)
+            return bin_edges
+        elif strategy == 'regular':
+            values_array = np.array(values).ravel()
+            unique_values = np.asarray(list(set(values_array)))
+            unique_values.sort()
+            bin_edges = list(np.arange(unique_values[0] - tolerance / 2, unique_values[-1], tolerance))
+            bin_edges.append(unique_values[-1] + tolerance / 2)
+            return bin_edges
         else:
-            pass
+            raise ValueError('Invalid binning strategy provided: (\'adaptive\', \'regular\', list) expected, got %s',
+                             strategy)
+    else:
+        return [x for x in strategy]
 
-    bin_edges.append(unique_values[-1] + tolerance / 2)
-
-    return bin_edges
 
 
 def _merge_locus(locus_list):
@@ -444,7 +463,7 @@ def _merge_locus(locus_list):
     return merged_locus
 
 
-def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2):
+def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins='adaptive', a4_bins='adaptive'):
     """
     Bins actual detector counts together from multiple runs.
     :param data_frames: Pandas data frames from Scan objects.
@@ -455,8 +474,8 @@ def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2):
     joined_frames = joined_frames.assign(counts_norm=joined_frames.counts/joined_frames.coeff)
     joined_frames = joined_frames.drop(joined_frames[joined_frames.valid != 1].index)  # delete dead detectors
 
-    a3_cuts = bin_and_cut(joined_frames.A3, tolerance=a3_tolerance)
-    a4_cuts = bin_and_cut(joined_frames.A4, tolerance=a4_tolerance)
+    a3_cuts = bin_and_cut(joined_frames.A3, tolerance=a3_tolerance, strategy=a3_bins)
+    a4_cuts = bin_and_cut(joined_frames.A4, tolerance=a4_tolerance, strategy=a4_bins)
     group = joined_frames.groupby([a3_cuts, a4_cuts])
     sums = group['counts', 'counts_norm', 'MON'].sum()
     means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
@@ -469,7 +488,7 @@ def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2):
     return result.reset_index(drop=True)
 
 
-def bin_and_cut(data, tolerance=0.2):
+def bin_and_cut(data, tolerance=0.2, strategy='adaptive'):
     # type: (pd.Series, float) -> Categorical
     """
     Applies adaptive binning and return a pandas.Categorical cut object
@@ -477,7 +496,7 @@ def bin_and_cut(data, tolerance=0.2):
     :param tolerance: Binning tolerance.
     :return: pd.cut results.
     """
-    bin_edges = make_bin_edges(data, tolerance)
+    bin_edges = make_bin_edges(data, tolerance, strategy=strategy)
     cut = pd.cut(data, bin_edges)
     return cut
 
@@ -495,6 +514,7 @@ def series_to_binder(items):
 def bin_scans(list_of_data,  # type: ['Scan']
               nan_fill=0, ignore_ef=False,
               en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, a3_tolerance=0.2, a4_tolerance=0.2,
+              en_bins='adaptive', tt_bins='adaptive', mag_bins='adaptive', a3_bins='adaptive', a4_bins='adaptive',
               angle_voronoi=False):
     # type: (...)-> BinnedData
     """
@@ -507,6 +527,12 @@ def bin_scans(list_of_data,  # type: ['Scan']
     :param mag_tolerance: Magnetic field binning tolerance.
     :param a3_tolerance: A3 angle binning tolerance of data points.
     :param a4_tolerance: A4 angle binning tolerance of data points.
+    :param en_bins: (str, list) Strategy for bin creation. 'adaptive' to bin points based on proximity; 'regular'
+    creates a regular grid of bins.
+    :param mag_bins: see en_bins.
+    :param tt_bins: see en_bins.
+    :param a3_bins: see en_bins.
+    :param a4_bins: see en_bins.
     :param angle_voronoi: Performs Voronoi partition in angle plane instead of reciprocal plane.
     :return: BinnedData object.
     """
@@ -524,10 +550,10 @@ def bin_scans(list_of_data,  # type: ['Scan']
                                                                                     scan.planned_locus_list[j]]
 
     all_data = all_data.fillna(nan_fill)
-    cut_ei = bin_and_cut(all_data.ei, en_tolerance)
-    cut_en = bin_and_cut(all_data.en, en_tolerance)
-    cut_tt = bin_and_cut(all_data.tt, tt_tolerance)
-    cut_mag = bin_and_cut(all_data.mag, mag_tolerance)
+    cut_ei = bin_and_cut(all_data.ei, en_tolerance, strategy=en_bins)
+    cut_en = bin_and_cut(all_data.en, en_tolerance, strategy=en_bins)
+    cut_tt = bin_and_cut(all_data.tt, tt_tolerance, strategy=tt_bins)
+    cut_mag = bin_and_cut(all_data.mag, mag_tolerance, strategy=mag_bins)
 
     if ignore_ef:
         raise NotImplementedError('For the love of god do not try to mix data from different final energies!')
@@ -535,7 +561,8 @@ def bin_scans(list_of_data,  # type: ['Scan']
         grouped = all_data.groupby([cut_ei, cut_en, cut_tt, cut_mag])
     grouped_meta = grouped['ei', 'ef', 'en', 'tt', 'mag'].mean()
     grouped_data = grouped['points'].apply(series_to_binder).apply(lambda x:
-                                                                   _MergedDataPoints(x, a3_tolerance, a4_tolerance))
+                                                                   _MergedDataPoints(x, a3_tolerance, a4_tolerance,
+                                                                                     a3_bins, a4_bins))
 
     grouped_locus_a = grouped['locus_a'].apply(series_to_binder).apply(_MergedLocus)
     grouped_locus_p = grouped['locus_p'].apply(series_to_binder).apply(_MergedLocus)
@@ -621,6 +648,7 @@ def _expand_offset_parameter(param, filename_list):
 
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
                  en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, a3_tolerance=0.2, a4_tolerance=0.2,
+                 en_bins='adaptive', tt_bins='adaptive', mag_bins='adaptive', a3_bins='adaptive', a4_bins='adaptive',
                  a3_offset=None, a4_offset=None, angle_voronoi=False):
     """
     Reads and bins MultiFLEXX scan files together.
@@ -634,6 +662,12 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
     :param mag_tolerance: Magnetic field tolerance, default to 0.05T.
     :param a3_tolerance: A3 angle tolerance, default is 0.2deg.
     :param a4_tolerance: A4 angle tolerance, default is 0.2deg.
+    :param en_bins: (str, list) Strategy for bin creation. 'adaptive' to bin points based on proximity; 'regular'
+    creates a regular grid of bins.
+    :param mag_bins: see en_bins.
+    :param tt_bins: see en_bins.
+    :param a3_bins: see en_bins.
+    :param a4_bins: see en_bins.
     :param a3_offset: Angle value to be added into raw A3 angles, in degrees.
     :param a4_offset: Angle value to be added into raw A4 angles, in degrees.
     :param angle_voronoi: Whether to perform Voronoi tessellation in angles instead of Q-coordinates.
@@ -650,7 +684,8 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
         else:
             raise ValueError('%s: Got a parameter that is neither a list nor a directory')
     df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance,
-                   a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance, angle_voronoi=angle_voronoi)
+                   a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance, en_bins=en_bins, tt_bins=tt_bins,
+                   mag_bins=mag_bins, a3_bins=a3_bins, a4_bins=a4_bins, angle_voronoi=angle_voronoi)
     return df
 
 
@@ -679,9 +714,10 @@ class _MergedLocus(list):
 
 class _MergedDataPoints(pd.DataFrame):
     # Helper class to override __str__ behaviour.
-    def __init__(self, items, a3_tolerance=0.2, a4_tolerance=0.2):
+    def __init__(self, items, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins='adaptive', a4_bins='adaptive'):
         # type: (_DataBinder, float) -> None
-        binned_points = _merge_scan_points(items, a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance)
+        binned_points = _merge_scan_points(items, a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance,
+                                           a3_bins=a3_bins, a4_bins=a4_bins)
         super(_MergedDataPoints, self).__init__(binned_points)
 
     def __str__(self):
@@ -845,7 +881,7 @@ class BinnedData(object):
             cut_object.plot(precision=precision, labels=labels)
         return cut_object
 
-    def dispersion(self, start, end, no_points=21):
+    def dispersion(self, start, end, no_points=21, colorbar=False):
         energies = self.data.en
         en_cuts = bin_and_cut(energies, tolerance=0.05)
         multiindex = self.data.groupby(en_cuts)['ef'].nsmallest(1).index
@@ -854,7 +890,7 @@ class BinnedData(object):
         except TypeError:
             indices = multiindex
         c = self.cut_bins(start=start, end=end, subset=indices, no_points=no_points, plot=False)
-        return c.vstack()
+        return c.vstack(colorbar)
 
     def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True):
         # type: (..., list, int, float, str, bool) -> 'Plot2D'
@@ -1132,7 +1168,7 @@ class ConstECut(object):
         end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
         ax.set_xlabel('Relative position\n%s to %s' % (start_xlabel, end_xlabel))
 
-    def vstack(self):
+    def vstack(self, colorbar=False):
         energies = [self.data_object.data.loc[index, 'en'] for index in self.data_indices]
         energy_bin_edges = _dispersion_bin_edges(energies)
         shapes = []
@@ -1151,6 +1187,8 @@ class ConstECut(object):
         cut_path = mpl_patches.Rectangle((0, energies[0]), 1, energies[-1] - energies[0], facecolor='None')
         ax.add_patch(cut_path)
         shape_col.set_clip_path(cut_path)
+        cbar = f.colorbar(shape_col)
+        cbar.set_label('Counts per monitor count')
         # patch_poly.set_clip_box([[0, energies[0]], [1, energies[-1]]])
         ax.add_collection(shape_col)
         ax.set_xlim(0, 1)
