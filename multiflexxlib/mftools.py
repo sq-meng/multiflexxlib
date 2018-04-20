@@ -208,6 +208,15 @@ class Scan(object):
         :param file_name: File name of TASMAD scan file.
         :param ub_matrix: UBMatrix object to be used. Omit to generate from file header.
         :param intensity_matrix: Intensity correction matrix to be used. Omit to use default.
+        :return: Scan object.
+        Examples:
+        >>> import multiflexxlib as mfl
+        >>> s1 = mfl.Scan('068577')  # opens scan file 068577
+        >>> s2 = mfl.Scan(68577)  # also possible to provide filename in number form. Will be padded to full length.
+        >>> u = mfl.UBMatrix([4.05, 4.05, 4.05, 90, 90, 90], [1, 0, 0], [0, 0, 1])
+        >>> s3 = mfl.Scan(68577, ub_matrix=u, a3_offset=1.2)  # Applies a custom UBMatrix and add 1.2 degrees to all A3
+        angles.
+        >>> s3.a3_offset = 1.95  # a3_offset and a4_offset can be set after creation.
         """
         file_name = _number_to_scan(file_name)
         f = open(file_name)
@@ -217,7 +226,7 @@ class Scan(object):
         self._a4_offset = a4_offset
         self._apply_offsets(a3_offset, a4_offset)
         if 'flat' not in self.data.columns:
-            raise AttributeError('%s does not contain flatcone data.' % file_name)
+            raise AttributeError('%s does not contain MultiFLEXX data.' % file_name)
         elif 'A3' not in self.header['STEPS'].keys():
             raise AttributeError('%s is not A3 scan.' % file_name)
         elif 'EI' in self.header['STEPS'].keys():
@@ -370,17 +379,35 @@ class Scan(object):
             self.converted_dataframes[ef_channel_num].loc[:, ['h', 'k', 'l']] = self.ub_matrix.convert(qs, 'sr').T
         coefficient = INTENSITY_COEFFICIENT
         detector_working = DETECTOR_WORKING
-        for point_num in range(num_flat_frames):
-            flatcone_array = np.asarray(self.data.loc[point_num, 'flat'])
-            for ef_channel_num in range(len(EF_LIST)):
-                dataframe = self.converted_dataframes[ef_channel_num]
-                rows = slice(point_num * num_ch, (point_num + 1) * num_ch - 1, None)
-                dataframe.loc[rows, 'counts'] = flatcone_array[:, ef_channel_num]
-                dataframe.loc[rows, 'valid'] = detector_working[:, ef_channel_num]
-                dataframe.loc[rows, 'coeff'] = coefficient[:, ef_channel_num]
-                dataframe.loc[rows, 'point'] = self.data.loc[point_num, 'PNT']
-                dataframe.loc[rows, 'ach'] = range(1, num_ch + 1)
-                # dataframe.loc[rows, 'file'] = self.file_name
+        for ef_channel_num in range(len(EF_LIST)):
+            dataframe = self.converted_dataframes[ef_channel_num]
+            counts = np.zeros(num_ch * num_flat_frames, dtype='float64')
+            valid = np.zeros(num_ch * num_flat_frames, dtype='float64')
+            coeff = np.zeros(num_ch * num_flat_frames, dtype='float64')
+            point = np.zeros(num_ch * num_flat_frames, dtype='float64')
+            ach = np.zeros(num_ch * num_flat_frames, dtype='float64')
+            for point_num in range(num_flat_frames):
+                flatcone_array = np.asarray(self.data.loc[point_num, 'flat'])
+                # START direct access to DataFrame
+                # rows = slice(point_num * num_ch, (point_num + 1) * num_ch - 1, None)
+                # dataframe.at[rows, 'counts'] = flatcone_array[:, ef_channel_num]
+                # dataframe.at[rows, 'valid'] = detector_working[:, ef_channel_num]
+                # dataframe.at[rows, 'coeff'] = coefficient[:, ef_channel_num]
+                # dataframe.at[rows, 'point'] = self.data.loc[point_num, 'PNT']
+                # dataframe.at[rows, 'ach'] = range(1, num_ch + 1)
+                # END direct access to DataFrame
+                # Buffer results into ndarray first, 4x faster than direct access, for some reason.
+                rows = slice(point_num * num_ch, (point_num + 1) * num_ch, None)
+                counts[rows] = flatcone_array[:, ef_channel_num]
+                valid[rows] = detector_working[:, ef_channel_num]
+                coeff[rows] = coefficient[:, ef_channel_num]
+                point[rows] = self.data.loc[point_num, 'PNT']
+                ach[rows] = range(1, num_ch + 1)
+            dataframe.counts = counts
+            dataframe.valid = valid
+            dataframe.coeff = coeff
+            dataframe.point = point
+            dataframe.ach = ach
 
     @property
     def a3_ranges(self):
@@ -414,7 +441,8 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
     """
     :param values: An iterable list of all physical quantities, repetitions allowed.
     :param tolerance: maximum difference in value for considering two points to be the same.
-    :param strategy:
+    :param strategy: (str, iterable) 'adaptive' to bin points based on proximity, 'regular' to bin points into a regular
+    set of bins. Provide an iterable to manually set bin EDGES.
     :return: a list of bin edges
 
     Walks through sorted unique values, if a point is further than tolerance away from the next, a bin edge is
@@ -423,7 +451,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
     """
     if isinstance(strategy, str):
         if strategy == 'adaptive':
-            values_array = np.array(values).ravel()
+            values_array = np.asarray(values).ravel()
             unique_values = np.asarray(list(set(values_array)))
             unique_values.sort()
             bin_edges = [unique_values[0] - tolerance / 2]
@@ -440,7 +468,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
             bin_edges.append(unique_values[-1] + tolerance / 2)
             return bin_edges
         elif strategy == 'regular':
-            values_array = np.array(values).ravel()
+            values_array = np.asarray(values).ravel()
             unique_values = np.asarray(list(set(values_array)))
             unique_values.sort()
             bin_edges = list(np.arange(unique_values[0] - tolerance / 2, unique_values[-1], tolerance))
@@ -453,13 +481,12 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
         return [x for x in strategy]
 
 
-
 def _merge_locus(locus_list):
     clipper = pyclipper.Pyclipper()
     for locus in locus_list:
         clipper.AddPath(pyclipper.scale_to_clipper(locus), pyclipper.PT_SUBJECT)
 
-    merged_locus = np.array(pyclipper.scale_from_clipper(clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO)))
+    merged_locus = np.asarray(pyclipper.scale_from_clipper(clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO)))
     return merged_locus
 
 
@@ -527,8 +554,8 @@ def bin_scans(list_of_data,  # type: ['Scan']
     :param mag_tolerance: Magnetic field binning tolerance.
     :param a3_tolerance: A3 angle binning tolerance of data points.
     :param a4_tolerance: A4 angle binning tolerance of data points.
-    :param en_bins: (str, list) Strategy for bin creation. 'adaptive' to bin points based on proximity; 'regular'
-    creates a regular grid of bins.
+    :param en_bins: (str, iterable) Strategy for bin creation. 'adaptive' to bin points based on proximity; 'regular'
+    creates a regular grid of bins. Provide an iterable to manually set bin EDGES.
     :param mag_bins: see en_bins.
     :param tt_bins: see en_bins.
     :param a3_bins: see en_bins.
@@ -652,8 +679,9 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
                  a3_offset=None, a4_offset=None, angle_voronoi=False):
     """
     Reads and bins MultiFLEXX scan files together.
-    :param filename_list: A list containing absolute or relative paths of TASMAD scan files to read. User will be
-    prompted to choose a directory if omitted.
+    :param filename_list: A list containing absolute or relative paths of TASMAD scan files to read.
+    Integer type elements will be padded to full FLEXX scan file names. User will be prompted to choose a directory if
+    omitted.
     :param ub_matrix: UBMatrix object to be used. Omit to generate from data headers.
     :param intensity_matrix: Intensity correction matrix to be used. Omit to use the default one.
     :param processes: Number of processes to use.
@@ -672,6 +700,18 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
     :param a4_offset: Angle value to be added into raw A4 angles, in degrees.
     :param angle_voronoi: Whether to perform Voronoi tessellation in angles instead of Q-coordinates.
     :return: BinnedData object.
+
+    Examples:
+    >>> import multiflexxlib as mfl
+    >>> df1 = mfl.read_and_bin() # Prompts for a path, reads and bins all found data.
+    >>> u = mfl.UBMatrix([4.05, 4.05, 4.05, 90, 90, 90], [1, 0, 0], [0, 0, 1])  # creates an UBMatrix
+    >>> df2 = mfl.read_and_bin(ub_matrix=u)  # loads data but apply supplied UBMatrix instead of auto generation.
+    >>> df3 = mfl.read_and_bin(a3_offset=1.2, a4_tolerance=0.4)  # There is an A3 angle offset and A4 angle error
+    due to aging Tanzboden. We wish to loosen A4 angle binning tolerance. Apply these numbers to loaded data.
+    >>> df4 = mfl.read_and_bin(a3_tolerance=1, a3_bins='regular')  # A3 rotation is a huge mess and lands on large,
+    # random error. Falls back to regular bins using 'regular' bin mode.
+    >>> df5 = mfl.read_and_bin(angle_voronoi=True)  # Performs Voronoi partition in angle space instead of Q-space.
+    # Useful when you need regions with identical angle values fully line up.
     """
     if filename_list is None:
         items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes, a3_offset, a4_offset)
@@ -769,15 +809,16 @@ class BinnedData(object):
                 list_of_lop.append(lop_p_filtered)
             self.data = self.data.assign(voro=list_of_lop)
 
-    def cut_voronoi(self, start, end, subset=None, precision=2, labels=None, monitor=True, plot=True):
+    def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True, plot=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
         :param end: ending point in r.l.u., vector.
         :param subset: a list of indices to cut. Omit to cut all available data.
-        :param precision: refer to make_label method.
+        :param label_precision: refer to make_label method.
         :param labels: refer to make_label method.
         :param monitor: if normalize by monitor count.
+        :param plot: if spawn a plot automatically.
         :return: ECut object.
         """
         start_p = self.ub_matrix.convert(start, 'rp')[0:2]
@@ -807,10 +848,10 @@ class BinnedData(object):
             cut_results.append(result)
         cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
         if plot:
-            cut_object.plot(precision=precision, labels=labels)
+            cut_object.plot(precision=label_precision, labels=labels)
         return cut_object
 
-    def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, precision=2, labels=None,
+    def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, label_precision=2, labels=None,
                  plot=True):
         """
         Generate 1D-cuts with rectangular bins.
@@ -820,7 +861,7 @@ class BinnedData(object):
         :param xtol: Bin size along cutting axis, in absolute reciprocal length.
         :param ytol: Lateral half bin size in [h, k, l] or absolute reciprocal length.
         :param no_points: Number of bins along cutting axis.
-        :param precision: refer to make_label method.
+        :param label_precision: refer to make_label method.
         :param labels: refer to make_label method.
         :param plot: Automatically spawns a plot if true.
         :return: ConstECut object.
@@ -878,7 +919,7 @@ class BinnedData(object):
             list_bin_polygons.append(bin_polygons)
         cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
         if plot:
-            cut_object.plot(precision=precision, labels=labels)
+            cut_object.plot(precision=label_precision, labels=labels)
         return cut_object
 
     def dispersion(self, start, end, no_points=21, colorbar=False):
@@ -1076,13 +1117,13 @@ class ConstECut(object):
     def __init__(self, cuts, point_indices, list_bin_polygons, data_object, data_indices, start, end):
         """
         Const-E cut object, should not be instantiated on its own.
-        :param cuts:
-        :param point_indices:
-        :param list_bin_polygons:
-        :param data_object:
-        :param data_indices:
-        :param start:
-        :param end:
+        :param cuts: cut data points: x, y, yerr.
+        :param point_indices: Which points are used in cut generation.
+        :param list_bin_polygons: A list containing polygons describing bins.
+        :param data_object: From which BinnedData this is created.
+        :param data_indices: Index of data from data_object.
+        :param start: Starting indices in reciprocal units.
+        :param end: Ending indices.
         """
         self.cuts = cuts
         self.data_object = data_object
@@ -1497,7 +1538,7 @@ def _init_2dplot_figure(rows, cols, ub_matrix):
     # type: (int, int, UBMatrix) -> ...
     if ub_matrix.is_orthogonal:
         f, axes = plt.subplots(rows, cols, sharex='all', sharey='all')
-        return f, np.array(axes)
+        return f, np.asarray(axes)
     else:
         f = plt.figure()
         grid_helper = _create_grid_helper(ub_matrix.shear_coeff)
@@ -1511,7 +1552,7 @@ def _init_2dplot_figure(rows, cols, ub_matrix):
             ax.yaxis.set_label_coords(0.5, -0.1)
             f.add_subplot(ax)
             axes.append(ax)
-        return f, np.array(axes)
+        return f, np.asarray(axes)
 
 
 def _create_grid_helper(shear_coeff):

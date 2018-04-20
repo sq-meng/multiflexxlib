@@ -26,6 +26,7 @@ def test_given_bins():
     b100 = mfl.make_bin_edges(v100, strategy=v100)
     assert np.all(np.isclose(b100, v100))
 
+
 def test_exc():
     with pytest.raises(ValueError):
-        mfl.make_bin_edges([1,2,3], tolerance=0.2, strategy='wrong')
+        mfl.make_bin_edges([1, 2, 3], tolerance=0.2, strategy='wrong')
