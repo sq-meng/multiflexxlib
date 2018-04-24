@@ -173,8 +173,11 @@ class UBMatrix(object):
         len_y = np.linalg.norm(plot_y_s)
         self.figure_aspect = len_y / len_x
 
-    def angle_to_qs(self, ki, kf, a3, a4):
-        return angle_to_qs(ki, kf, a3, a4, self.a3_add, self.a4_add)
+    def angle_to_q(self, ki, kf, a3, a4, system='s'):
+        return angle_to_q(ki, kf, a3, a4, self.a3_add, self.a4_add, system=system, ub_matrix=self)
+
+    def find_spurion(self, q, ki, kf, type='a', in_system='r', out_system='r'):
+        return find_spurion(q, ki, kf, self, type, in_system, out_system)
 
     def convert(self, vectors, sys, axis=1):
         """
@@ -328,7 +331,7 @@ def find_triangle_angles(a, b, c):
     bb = (a ** 2 + c ** 2 - b ** 2) / (2 * a * c)
     cc = (a ** 2 + b ** 2 - c ** 2) / (2 * a * b)
     if abs(aa) > 1 or abs(bb) > 1 or abs(cc) > 1:
-        raise ValueError('Scattering triangle does not close.')
+        raise ValueError('triangle does not close.')
     alpha = np.arccos(aa)
     beta = np.arccos(bb)
     gamma = np.arccos(cc)
@@ -336,7 +339,7 @@ def find_triangle_angles(a, b, c):
     return alpha, beta, gamma
 
 
-def angle_to_qs(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0):
+def angle_to_q(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0, system='s', ub_matrix=None):
     """
     # type: (float, float, ...) -> ...
     :param ki: ki, in angstroms^-1
@@ -345,6 +348,8 @@ def angle_to_qs(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0):
     :param a4: A4 angles, in degrees.
     :param a3_add: value to be ADDED to A3, in degrees.
     :param a4_add: value to be ADDED to A4, in degrees.
+    :param system: Output system, ('s', 'r', 'p')
+    :param ub_matrix: UBMatrix object, required if system is not 's'.
     :return: q vectors in S system, 3xN array if input is in iterable form.
     """
     try:
@@ -366,4 +371,68 @@ def angle_to_qs(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0):
         ki_in_s = ki * initial_vectors
     kf_in_s = kf * rotate_around_z(initial_vectors, np.radians(a4))
     q_in_s = rotate_around_z(kf_in_s - ki_in_s, - np.radians(a3))
-    return q_in_s
+    if system == 's':
+        return q_in_s
+    else:
+        if UBMatrix is None:
+            raise TypeError('UBMatrix required for angle to Q if output system is not sample system.')
+        return ub_matrix.convert(q_in_s, 's' + system)
+
+
+def v1_to_v2(v1, v2):
+    norm = np.linalg.norm
+    cosine = np.dot(v1, v2) / (norm(v1) * norm(v2))
+    acos = np.arccos(cosine)
+    if np.cross(v1, v2)[2] >= 0:
+        return acos
+    else:
+        return -acos
+
+
+def find_a3_a4(q, ki, kf, ub_matrix, system='r', sense=1):
+    # type: ((np.ndarray, list), float, float, UBMatrix, str, int) -> (float, float)
+    """
+    Finds A3 and A4 angle for given vector.
+    :param q: 3-element Q vector. Does not accept a list of vectors.
+    :param ki: ki
+    :param kf: kf
+    :param ub_matrix: UBMatrix object.
+    :param system: In which system is the vector given. r for reciprocal vectors.
+    :param sense: Scattering sense, +1 for CCW scattering
+    :return: (a3, a4) in degrees
+    """
+    q_in_s = ub_matrix.convert(q, system + 's')
+    if not np.isclose(q_in_s[2], 0):
+        raise ValueError('Q not in scattering plane.')
+    alpha, beta, gamma = find_triangle_angles(np.linalg.norm(q_in_s), ki, kf)
+
+    a4_rad = alpha * sense
+    ki_in_s = rotate_around_z(q_in_s, gamma * sense + np.pi) / np.linalg.norm(q_in_s) * ki
+    ki_zero_s = ub_matrix.convert(np.asarray(ub_matrix.hkl1) * -1, 'rs')
+    a3_rad = -1 * v1_to_v2(ki_zero_s, ki_in_s)
+    return a3_rad * 180 / np.pi, a4_rad * 180 / np.pi
+
+
+def find_spurion(q, ki, kf, ub_matrix, type='a', in_system='r', out_system='r'):
+    """
+    Find nominal position of spurion from accidental Bragg scattering for give parameters <Shirane, 2002, p.148>
+    :param q: length-3 vector of Bragg reflection
+    :param ki: nominal incoming wavevector , 1/Angstrom.
+    :param kf: nominal final wavevector
+    :param ub_matrix: UBMatrix object.
+    :param type: 'a' = Typ A, 'm' = Typ M
+    :param in_system: Input vector coordinate system, ('r', 's', 'p')
+    :param out_system: Output vector coordinate system, ('r', 's', 'p')
+    :return: length-3 vector of spurion position.
+    """
+    # type: ((np.ndarray, list), float, float, UBMatrix, str, str, str) -> np.ndarray
+    qr = ub_matrix.convert(q, in_system + 'r')
+
+    if type.lower() == 'a':
+        a3, a4 = find_a3_a4(qr, ki, ki, ub_matrix)
+    elif type.lower() == 'm':
+        a3, a4 = find_a3_a4(qr, kf, kf, ub_matrix)
+    else:
+        raise ValueError('Spurion type should be either a (Typ A) or m (Typ M).')
+    spurion_s = angle_to_q(ki, kf, a3, a4)
+    return ub_matrix.convert(spurion_s, 's' + out_system).ravel()

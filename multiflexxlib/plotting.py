@@ -7,7 +7,7 @@ from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
 
 
-def generate_vpatch(x, y=None, aspect=1, max_cell=0.1):
+def voronoi_polygons(x, y=None, aspect=1, max_cell=0.1):
     # type: (...) -> list
     """
     :param x: 1-D list or np.array: x coordinates on a 2-D plane.

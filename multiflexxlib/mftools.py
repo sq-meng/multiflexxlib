@@ -10,7 +10,7 @@ import re
 from collections import defaultdict
 from multiflexxlib import plotting
 from multiflexxlib import ub
-from multiflexxlib.ub import UBMatrix, etok, ktoe, angle_to_qs
+from multiflexxlib.ub import UBMatrix, etok, ktoe, angle_to_q
 import pyclipper
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpl_patches
@@ -374,7 +374,7 @@ class Scan(object):
         data_template.loc[:, ['A3', 'A4', 'MON']] = a3_a4_mon_array
         self.converted_dataframes = [data_template.copy() for _ in range(len(EF_LIST))]
         for ef_channel_num, ef in enumerate(EF_LIST):
-            qs = self.ub_matrix.angle_to_qs(self.ki, etok(ef), a3_a4_mon_array[:, 0], a3_a4_mon_array[:, 1])
+            qs = self.ub_matrix.angle_to_q(self.ki, etok(ef), a3_a4_mon_array[:, 0], a3_a4_mon_array[:, 1])
             self.converted_dataframes[ef_channel_num].loc[:, ['px', 'py', 'pz']] = self.ub_matrix.convert(qs, 'sp').T
             self.converted_dataframes[ef_channel_num].loc[:, ['h', 'k', 'l']] = self.ub_matrix.convert(qs, 'sr').T
         coefficient = INTENSITY_COEFFICIENT
@@ -436,7 +436,7 @@ class Scan(object):
         pass
 
 
-def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
+def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
     # type: ((list, pd.Series), float) -> list
     """
     :param values: An iterable list of all physical quantities, repetitions allowed.
@@ -462,7 +462,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive'):
                     current_walk = 0
                 else:
                     current_walk = current_walk + unique_values[i+1] - unique_values[i]
-                if current_walk > tolerance:
+                if current_walk > tolerance and detect_diffuse:
                     raise ValueError('Bin edge creation failed due to diffuse clustering of values.')
 
             bin_edges.append(unique_values[-1] + tolerance / 2)
@@ -515,7 +515,7 @@ def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=
     return result.reset_index(drop=True)
 
 
-def bin_and_cut(data, tolerance=0.2, strategy='adaptive'):
+def bin_and_cut(data, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
     # type: (pd.Series, float) -> Categorical
     """
     Applies adaptive binning and return a pandas.Categorical cut object
@@ -523,7 +523,7 @@ def bin_and_cut(data, tolerance=0.2, strategy='adaptive'):
     :param tolerance: Binning tolerance.
     :return: pd.cut results.
     """
-    bin_edges = make_bin_edges(data, tolerance, strategy=strategy)
+    bin_edges = make_bin_edges(data, tolerance, strategy=strategy, detect_diffuse=detect_diffuse)
     cut = pd.cut(data, bin_edges)
     return cut
 
@@ -776,7 +776,10 @@ class BinnedData(object):
         self._file_names = file_names
         self.data = source_dataframe
         self.ub_matrix = ub_matrix
-        self._generate_voronoi(angle_voronoi)
+        if 'voro' not in self.data.columns:
+            self.data.loc[:, 'voro'] = pd.Series([[] for _ in self.data.index], index=self.data.index)
+            self.data.voro = self.data.voro.astype(object)
+            self.update_voronoi(angle_voronoi=angle_voronoi)
         self.angle_voronoi = angle_voronoi
 
     def file_names(self):
@@ -790,24 +793,32 @@ class BinnedData(object):
         return str(pd.concat((self.data[['ei', 'en', 'ef', 'tt', 'mag']],
                               self.data[['locus_a', 'locus_p', 'points']].astype('str')), axis=1))
 
-    def _generate_voronoi(self, angle_voronoi):
-        # TODO: defuse this iterator landmine: is this iterating through index column or what?
-        if not angle_voronoi:
-            list_of_lop = []
-            for i, item in enumerate(self.data['points']):
-                lop = plotting.generate_vpatch(item['px'], item['py'], self.ub_matrix.figure_aspect, max_cell=0.2)
-                list_of_lop.append(lop)
-            self.data = self.data.assign(voro=list_of_lop)
+    def update_voronoi(self, indices=None, angle_voronoi=False):
+        if indices is None:
+            indices = self.data.index
+        elif isinstance(indices, int):
+            indices = [indices]
         else:
-            list_of_lop = []
-            for i, item in enumerate(self.data['points']):
-                lop_angle = plotting.generate_vpatch(item['A3'], item['A4'], self.ub_matrix.figure_aspect, max_cell=2.5)
-                lop_s = [self.ub_matrix.angle_to_qs(etok(self.data.ei[i]), etok(self.data.ef[i]),
+            raise TypeError('Index must be a list or a number or None')
+
+        if not angle_voronoi:
+            for ind in indices:
+                points = self.data.loc[ind, 'points']
+                list_of_polygons = plotting.voronoi_polygons(points['px'], points['py'],
+                                                             self.ub_matrix.figure_aspect, max_cell=0.2)
+                self.data.loc[ind, 'voro'][:] = []
+                self.data.loc[ind, 'voro'].extend(list_of_polygons)
+        else:
+            for ind in indices:
+                points = self.data.loc[ind, 'points']
+                lop_angle = plotting.voronoi_polygons(points['A3'], points['A4'],
+                                                      self.ub_matrix.figure_aspect, max_cell=2.5)
+                lop_s = [self.ub_matrix.angle_to_q(etok(self.data.ei[ind]), etok(self.data.ef[ind]),
                                                     poly[:, 0], poly[:, 1]) for poly in lop_angle]
                 lop_p = [self.ub_matrix.convert(poly, 'sp') for poly in lop_s]
                 lop_p_filtered = [poly.T[:, 0:2] for poly in lop_p]
-                list_of_lop.append(lop_p_filtered)
-            self.data = self.data.assign(voro=list_of_lop)
+                self.data.loc[ind, 'voro'][:] = []
+                self.data.loc[ind, 'voro'].extend(lop_p_filtered)
 
     def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True, plot=True):
         """
@@ -844,7 +855,8 @@ class BinnedData(object):
                 intensities = df_filtered['counts_norm']
             yerr = intensities / np.sqrt(df_filtered['counts'])
             percentiles = plotting.projection_on_segment(np.asarray(points), seg, self.ub_matrix.figure_aspect)
-            result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr}).sort_values(by='x')
+            result = pd.DataFrame({'x': percentiles, 'y': intensities, 'yerr': yerr, 'bins': bin_polygons})\
+                .sort_values(by='x')
             cut_results.append(result)
         cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
         if plot:
@@ -917,6 +929,7 @@ class BinnedData(object):
             bin_polygons_s = _rectangular_bin_bounds(start_s, end_s, xtol, ytol)
             bin_polygons = [self.ub_matrix.convert(bins, sys='sp', axis=0)[:, 0:2] for bins in bin_polygons_s]
             list_bin_polygons.append(bin_polygons)
+            # cut_result.assign(bins=bin_polygons)
         cut_object = ConstECut(cut_results, point_indices, list_bin_polygons, self, subset, start, end)
         if plot:
             cut_object.plot(precision=label_precision, labels=labels)
@@ -1096,6 +1109,12 @@ class BinnedData(object):
             file = open(file_name, 'wb')
         pickle.dump(self, file)
 
+    def find_spurion(self, index, q, type='a', system='r'):
+        ki = etok(self.data.loc[index, 'ei'])
+        kf = etok(self.data.loc[index, 'ef'])
+        spurion = ub.find_spurion(q, ki, kf, self.ub_matrix, type, out_system=system)
+        return spurion
+
     def __copy__(self):
         return BinnedData(self.data, self._file_names, self.ub_matrix)
 
@@ -1223,6 +1242,7 @@ class ConstECut(object):
                 values.append(cut.y[j])
         shape_col = PatchCollection(shapes)
         shape_col.set_array(np.asarray(values))
+        shape_col.set_cmap('inferno')
 
         f, ax = plt.subplots(1)
         cut_path = mpl_patches.Rectangle((0, energies[0]), 1, energies[-1] - energies[0], facecolor='None')
@@ -1255,6 +1275,34 @@ class ConstECut(object):
         fca = self._changing_indices()[0]
         ax_p.set_xlim(self.start_r[fca], self.end_r[fca])
         ax_p.set_xlabel(list('HKL')[fca])
+
+    def re_bin(self, tolerance=0.01, subset=None):
+        if subset is None:
+            subset = range(len(self.cuts))
+        for i in subset:
+            energy_cut = self.cuts[i]
+            pandas_cut = bin_and_cut(energy_cut.x, tolerance=tolerance, detect_diffuse=False)
+            grouped = energy_cut.groupby(pandas_cut)
+            cut_out = grouped[['x', 'y', 'yerr']].mean().reset_index(drop=True)
+            merged_poly = grouped['bins'].apply(self._merge_polygon)
+            self.cuts[i] = cut_out
+            length = len(merged_poly)
+            self.list_bin_polygons[i] = list(merged_poly)
+
+    @staticmethod
+    def _merge_polygon(list_of_polygons):
+        list_of_polygons = list(list_of_polygons)
+        print('---------')
+        print(list_of_polygons)
+        clipper = pyclipper.Pyclipper()
+        for poly in list_of_polygons:
+
+            clipper.AddPath(pyclipper.scale_to_clipper(poly), pyclipper.PT_SUBJECT)
+        out = pyclipper.scale_from_clipper(clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO))[-1]
+        print('===')
+        print(out)
+        print('+++')
+        return out
 
 
 class Plot2D(object):
@@ -1327,13 +1375,22 @@ class Plot2D(object):
     def to_eps(self):
         pass
 
-    def cut(self, start, end, subset=None, precision=2, labels=None, monitor=True):
+    def draw_spurion(self, bragg):
+        for i in range(len(self.indices)):
+            data_index = self.indices[i]
+            ax = self.axes[i]
+            sp_a_r = self.data_object.find_spurion(data_index, bragg, type='a')
+            sp_a_p = self.data_object.ub_matrix.convert(sp_a_r, 'rp')
+            ax.scatter(sp_a_p[0], sp_a_p[1], zorder=20, edgecolor='r', facecolor='none')
+
+
+    def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
         :param end: ending point in r.l.u., vector.
         :param subset: a list of indices to cut. Omit to cut all available data.
-        :param precision: refer to make_label method.
+        :param label_precision: refer to make_label method.
         :param labels: refer to make_label method.
         :param monitor: if normalize by monitor count.
         :return: ECut object.
@@ -1342,7 +1399,28 @@ class Plot2D(object):
             subset = self.indices
         else:
             subset = [self.indices[x] for x in subset]
-        cut_obj = self.data_object.cut_voronoi(start, end, subset, precision, labels, monitor)
+        cut_obj = self.data_object.cut_voronoi(start, end, subset, label_precision, labels, monitor)
+        return cut_obj
+
+    def cut_bins(self, start, end, subset=None, xtol=None, ytol=None, no_points=None, label_precision=2, labels=None):
+        """
+        Generate 1D-cuts with rectangular bins.
+        :param start: starting point in r.l.u., vector.
+        :param end: ending point in r.l.u., vector.
+        :param subset: a list of indices to cut. Omit to cut all available data.
+        :param xtol: Bin size along cutting axis, in absolute reciprocal length.
+        :param ytol: Lateral half bin size in [h, k, l] or absolute reciprocal length.
+        :param no_points: Number of bins along cutting axis.
+        :param label_precision: refer to make_label method.
+        :param labels: refer to make_label method.
+        :param plot: Automatically spawns a plot if true.
+        :return: ConstECut object.
+        """
+        if subset is None:
+            subset = self.indices
+        else:
+            subset = [self.indices[x] for x in subset]
+        cut_obj = self.data_object.cut_bins(start, end, subset, xtol, ytol, no_points, label_precision, labels)
         return cut_obj
 
     def update_label(self, index, labels, precision=2):
@@ -1715,7 +1793,7 @@ def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expan
     a3_list = np.hstack((a3_range, a3_range[-1] * np.ones(len(a4_span_range_high)),
                          a3_range[::-1], a3_range[0] * np.ones(len(a4_span_range_low))))
     a4_list = np.hstack((a4_range_low, a4_span_range_high, a4_range_high, a4_span_range_low))
-    s_locus = angle_to_qs(ki, kf, a3_list, a4_list)
+    s_locus = angle_to_q(ki, kf, a3_list, a4_list)
     p_locus = ub_matrix.convert(s_locus, 'sp')
 
     return np.ndarray.tolist(p_locus[0:2, :].T)
