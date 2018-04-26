@@ -2,7 +2,7 @@ from setuptools import setup
 import os
 _here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(_here, 'README.md')) as f:
-    long_description = f.read()
+    pass
 
 requires = ['pyclipper>=1.1.0',
             'numpy>=1.14',
@@ -14,7 +14,7 @@ requires = ['pyclipper>=1.1.0',
 setup(name='multiflexxlib',
       version='0.2.10',
       description='Tools library for CAMEA neutron detector MultiFLEXX',
-      long_description=long_description,
+      long_description='See github page',
       url='http://github.com/sq-meng/multiflexxlib',
       author='Siqin Meng',
       author_email='mengsq04@gmail.com',

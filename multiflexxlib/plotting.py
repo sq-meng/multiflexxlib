@@ -5,6 +5,7 @@ import pyclipper
 import multiflexxlib.ub as ub
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
+from numba import jit
 
 
 def voronoi_polygons(x, y=None, aspect=1, max_cell=0.1):
@@ -35,22 +36,26 @@ def voronoi_polygons(x, y=None, aspect=1, max_cell=0.1):
     bbox = np.array([[xmin, ymin], [xmin, ymax], [xmax, ymin], [xmax, ymax]])
     xy_padded = np.vstack((xy, bbox))
     vor = Voronoi(xy_padded)
+    list_of_polygons = _populate_lop(x, y, vor.point_region, vor.regions, vor.vertices, max_cell, aspect)
 
+    return list_of_polygons
+
+
+def _populate_lop(x, y, point_region, regions, vertices, max_cell, aspect):
     list_of_polygons = []
     for i in range(len(x)):
-        region_index = vor.point_region[i]
-        vertices_indexes = vor.regions[region_index]
-        patch_vert_coords = [vor.vertices[vert_no] for vert_no in vertices_indexes]
-        pvca = np.array(patch_vert_coords) # patch_vert_coords_array
+        region_index = point_region[i]
+        vertices_indexes = regions[region_index]
+        patch_vert_coords = [vertices[vert_no] for vert_no in vertices_indexes]
+
+        pvca = np.asarray(patch_vert_coords)  # patch_vert_coords_array
         x_min, x_max = x[i] - max_cell, x[i] + max_cell
         y_min, y_max = y[i] - max_cell, y[i] + max_cell
-        pvca[pvca[:, 0] < x_min, 0] = x_min
-        pvca[pvca[:, 0] > x_max, 0] = x_max
-        pvca[pvca[:, 1] < y_min, 1] = y_min
-        pvca[pvca[:, 1] > y_max, 1] = y_max
+        pvca[:, 0] = pvca[:, 0].clip(min=x_min, max=x_max)
+        pvca[:, 1] = pvca[:, 1].clip(min=y_min, max=y_max)
         pvca[:, 1] = pvca[:, 1] / aspect
-        list_of_polygons.append(pvca)
 
+        list_of_polygons.append(pvca)
     return list_of_polygons
 
 
