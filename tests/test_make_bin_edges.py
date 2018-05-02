@@ -11,7 +11,7 @@ def test_walking_bins():
     b2 = mfl.make_bin_edges(v2)
     assert np.all(np.isclose(b2, [0.9, 1.5, 2.55, 3.5, 4.1]))
     with pytest.raises(ValueError):
-        v3 = [1, 2.1, 2.2, 2.3, 2.4, 3, 4]
+        v3 = [1, 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 3, 4]
         mfl.make_bin_edges(v3)
 
 

@@ -176,8 +176,11 @@ class UBMatrix(object):
     def angle_to_q(self, ki, kf, a3, a4, system='s'):
         return angle_to_q(ki, kf, a3, a4, self.a3_add, self.a4_add, system=system, ub_matrix=self)
 
-    def find_spurion(self, q, ki, kf, type='a', in_system='r', out_system='r'):
-        return find_spurion(q, ki, kf, self, type, in_system, out_system)
+    def find_spurion(self, q, ki, kf, spurion_type='a', in_system='r', out_system='r'):
+        return find_spurion(q, ki, kf, self, spurion_type, in_system, out_system)
+
+    def find_a3_a4(self, q, ki, kf, system='r', sense=1):
+        find_a3_a4(q, ki, kf, self, system, sense)
 
     def convert(self, vectors, sys, axis=1):
         """
@@ -413,14 +416,14 @@ def find_a3_a4(q, ki, kf, ub_matrix, system='r', sense=1):
     return a3_rad * 180 / np.pi, a4_rad * 180 / np.pi
 
 
-def find_spurion(q, ki, kf, ub_matrix, type='a', in_system='r', out_system='r'):
+def find_spurion(q, ki, kf, ub_matrix, spurion_type='a', in_system='r', out_system='r'):
     """
     Find nominal position of spurion from accidental Bragg scattering for give parameters <Shirane, 2002, p.148>
     :param q: length-3 vector of Bragg reflection
     :param ki: nominal incoming wavevector , 1/Angstrom.
     :param kf: nominal final wavevector
     :param ub_matrix: UBMatrix object.
-    :param type: 'a' = Typ A, 'm' = Typ M
+    :param spurion_type: 'a' = Typ A, 'm' = Typ M
     :param in_system: Input vector coordinate system, ('r', 's', 'p')
     :param out_system: Output vector coordinate system, ('r', 's', 'p')
     :return: length-3 vector of spurion position.
@@ -428,9 +431,9 @@ def find_spurion(q, ki, kf, ub_matrix, type='a', in_system='r', out_system='r'):
     # type: ((np.ndarray, list), float, float, UBMatrix, str, str, str) -> np.ndarray
     qr = ub_matrix.convert(q, in_system + 'r')
 
-    if type.lower() == 'a':
+    if spurion_type.lower() == 'a':
         a3, a4 = find_a3_a4(qr, ki, ki, ub_matrix)
-    elif type.lower() == 'm':
+    elif spurion_type.lower() == 'm':
         a3, a4 = find_a3_a4(qr, kf, kf, ub_matrix)
     else:
         raise ValueError('Spurion type should be either a (Typ A) or m (Typ M).')

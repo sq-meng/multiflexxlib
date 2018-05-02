@@ -462,7 +462,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=Tr
                     current_walk = 0
                 else:
                     current_walk = current_walk + unique_values[i+1] - unique_values[i]
-                if current_walk > tolerance and detect_diffuse:
+                if current_walk > 2 * tolerance and detect_diffuse:
                     raise ValueError('Bin edge creation failed due to diffuse clustering of values.')
 
             bin_edges.append(unique_values[-1] + tolerance / 2)
@@ -521,6 +521,8 @@ def bin_and_cut(data, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
     Applies adaptive binning and return a pandas.Categorical cut object
     :param data: a series or list of numbers. Repetition allowed.
     :param tolerance: Binning tolerance.
+    :param strategy: 'adaptive', 'regular' or a list describing bin edges.
+    :param detect_diffuse: Detect of the values are semi-continuous and cannot be cut into bins using adaptive mode.
     :return: pd.cut results.
     """
     bin_edges = make_bin_edges(data, tolerance, strategy=strategy, detect_diffuse=detect_diffuse)
@@ -678,7 +680,7 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
                  en_bins='adaptive', tt_bins='adaptive', mag_bins='adaptive', a3_bins='adaptive', a4_bins='adaptive',
                  a3_offset=None, a4_offset=None, angle_voronoi=False):
     """
-    Reads and bins MultiFLEXX scan files together.
+    Reads and bins MultiFLEXX scan files.
     :param filename_list: A list containing absolute or relative paths of TASMAD scan files to read.
     Integer type elements will be padded to full FLEXX scan file names. User will be prompted to choose a directory if
     omitted.
@@ -811,11 +813,11 @@ class BinnedData(object):
         else:
             for ind in indices:
                 points = self.data.loc[ind, 'points']
+                angle_to_q = self.ub_matrix.angle_to_q
                 lop_angle = plotting.voronoi_polygons(points['A3'], points['A4'],
                                                       self.ub_matrix.figure_aspect, max_cell=2.5)
-                lop_s = [self.ub_matrix.angle_to_q(etok(self.data.ei[ind]), etok(self.data.ef[ind]),
-                                                    poly[:, 0], poly[:, 1]) for poly in lop_angle]
-                lop_p = [self.ub_matrix.convert(poly, 'sp') for poly in lop_s]
+                lop_p = [angle_to_q(etok(self.data.ei[ind]), etok(self.data.ef[ind]),
+                                                    poly[:, 0], poly[:, 1], system='p') for poly in lop_angle]
                 lop_p_filtered = [poly.T[:, 0:2] for poly in lop_p]
                 self.data.loc[ind, 'voro'][:] = []
                 self.data.loc[ind, 'voro'].extend(lop_p_filtered)
@@ -1292,16 +1294,11 @@ class ConstECut(object):
     @staticmethod
     def _merge_polygon(list_of_polygons):
         list_of_polygons = list(list_of_polygons)
-        print('---------')
-        print(list_of_polygons)
         clipper = pyclipper.Pyclipper()
         for poly in list_of_polygons:
 
             clipper.AddPath(pyclipper.scale_to_clipper(poly), pyclipper.PT_SUBJECT)
         out = pyclipper.scale_from_clipper(clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO))[-1]
-        print('===')
-        print(out)
-        print('+++')
         return out
 
 
@@ -1375,13 +1372,13 @@ class Plot2D(object):
     def to_eps(self):
         pass
 
-    def draw_spurion(self, bragg):
+    def draw_spurion(self, reflection, spurion_type='a'):
         for i in range(len(self.indices)):
             data_index = self.indices[i]
             ax = self.axes[i]
-            sp_a_r = self.data_object.find_spurion(data_index, bragg, type='a')
+            sp_a_r = self.data_object.find_spurion(data_index, reflection, spurion_type=spurion_type)
             sp_a_p = self.data_object.ub_matrix.convert(sp_a_r, 'rp')
-            ax.scatter(sp_a_p[0], sp_a_p[1], zorder=20, edgecolor='r', facecolor='none')
+            return ax.scatter(sp_a_p[0], sp_a_p[1], zorder=20, edgecolor='r', facecolor='none')
 
 
     def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True):
@@ -1684,7 +1681,7 @@ def ask_directory(title='Choose a folder'):
 
 def list_flexx_files(path):
     """
-    Lists all TASMAD scan files under a directory.
+    Lists all files named with 6 numbers and without extensions.
     :param path: Source path.
     :return: A list of file names.
     """
