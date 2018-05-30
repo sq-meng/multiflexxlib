@@ -9,6 +9,11 @@ This package requires python3 version > 3.5. For installation of Python environm
 Alternately, Python2 > 2.7 is partially supported. Most of the code is written with Python 2 compatibility in mind, but might contain (additional) bugs.
 
 \>1GB of free memory recommended.
+
+### Ask me anything!
+
+If you are unsure about how to do something or are getting unexpected behaviour, opening an issue in Github or dropping me an email are 
+
 ## Installation
 run command `pip install multiflexxlib` from windows or linux command console.
 ## Usage
