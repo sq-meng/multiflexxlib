@@ -369,8 +369,6 @@ class Scan(object):
         data_template = pd.DataFrame(index=range(num_flat_frames * num_ch),
                                      columns=['A3', 'A4', 'MON', 'px', 'py', 'pz', 'h', 'k', 'l',
                                               'counts', 'valid', 'coeff', 'ach', 'point'], dtype='float64')
-        # data_template = data_template.assign(file=pd.Series(index=range(num_flat_frames * num_ch)), dtype='str')
-        # filename source not recorded for now due to performance concerns
         data_template.loc[:, ['A3', 'A4', 'MON']] = a3_a4_mon_array
         self.converted_dataframes = [data_template.copy() for _ in range(len(EF_LIST))]
         for ef_channel_num, ef in enumerate(EF_LIST):
@@ -956,7 +954,7 @@ class BinnedData(object):
         :param cols: How many columns should resulting plot have.
         :param aspect: y-x aspect ratio of generated plot. Larger value means unit length of y axis is greater. Omit to
         scale to equal length in absolute reciprocal length.
-        :param plot_type: String. 'v': Voronoi, 'm': Mesh, 's': Scatter, 'd' Delaunay interpolation. Will be cycles for
+        :param plot_type: String. 'v': Voronoi, 'm': Mesh, 's': Scatter, 'd' Delaunay interpolation. Will be cycled for
         all plots. e.g. 'vm' will alternate between Voronoi patches and mesh.
         :param controls: True to show controls on screen.
         :return: Plot2D object.
@@ -982,12 +980,25 @@ class BinnedData(object):
                 if item not in self.data.columns:
                     columns.pop(nth)
 
-        elements = ['%s=%.*f' % (elem, precision, self.data.loc[index, elem]) for elem in columns]
+        elements = ['%s=%.*f' % (self._translate_property_name(elem), precision, self.data.loc[index, elem])
+                    for elem in columns]
         if multiline:
             join_char = '\n'
         else:
             join_char = ', '
         return join_char.join(elements)
+
+    @staticmethod
+    def _translate_property_name(name):
+        translations = {'en': '${\Delta}E$',
+                        'tt': 'Temp.',
+                        'mag': 'Field',
+                        'ef': '$E_f$',
+                        'ei': '$E_i$'}
+        try:
+            return translations[name]
+        except KeyError:
+            return name
 
     def to_csv(self):
         subdir_name = '+'.join(self.scan_files()) + '_out'
@@ -1069,6 +1080,8 @@ class BinnedData(object):
         :return: None
         """
         xlabel, ylabel = ub.guess_axes_labels(self.ub_matrix.plot_x, self.ub_matrix.plot_y_nominal)
+        xlabel = xlabel + ' (r.l.u.)'
+        ylabel = ylabel + ' (r.l.u.)'
         ax.set_xlabel(xlabel)
         ax.set_ylabel(ylabel)
 
@@ -1111,10 +1124,10 @@ class BinnedData(object):
             file = open(file_name, 'wb')
         pickle.dump(self, file)
 
-    def find_spurion(self, index, q, type='a', system='r'):
+    def find_spurion(self, index, q, spurion_type='a', system='r'):
         ki = etok(self.data.loc[index, 'ei'])
         kf = etok(self.data.loc[index, 'ef'])
-        spurion = ub.find_spurion(q, ki, kf, self.ub_matrix, type, out_system=system)
+        spurion = ub.find_spurion(q, ki, kf, self.ub_matrix, spurion_type, out_system=system)
         return spurion
 
     def __copy__(self):
@@ -1192,7 +1205,7 @@ class ConstECut(object):
 
     def inspect(self, shade=True):
         """
-        Generate a graph showing which data points are included in the cuts.
+        Generates a graph showing which data points are included in the cuts.
         :return: None
         """
         f, axes = plt.subplots(nrows=2, ncols=len(self.cuts), sharex='row', sharey='row')
@@ -1228,7 +1241,7 @@ class ConstECut(object):
         ax.set_ylabel('Intensity (a.u.)')
         start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
         end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
-        ax.set_xlabel('Relative position\n%s to %s' % (start_xlabel, end_xlabel))
+        ax.set_xlabel('Relative position\n%s to %s\n(r.l.u.)' % (start_xlabel, end_xlabel))
 
     def vstack(self, colorbar=False):
         energies = [self.data_object.data.loc[index, 'en'] for index in self.data_indices]
@@ -1257,7 +1270,7 @@ class ConstECut(object):
         ax.set_xlim(0, 1)
         ax.set_ylim(energies[0], energies[-1])
         self.set_axes_labels(ax)
-        ax.set_ylabel('dE (meV)')
+        ax.set_ylabel('$\Delta$E (meV)')
         self.put_parasite_axis(ax)
         return f, ax
 
@@ -1276,7 +1289,7 @@ class ConstECut(object):
         ax_p = ax.twiny()
         fca = self._changing_indices()[0]
         ax_p.set_xlim(self.start_r[fca], self.end_r[fca])
-        ax_p.set_xlabel(list('HKL')[fca])
+        ax_p.set_xlabel(list('HKL')[fca] + ' (r.l.u.)')
 
     def re_bin(self, tolerance=0.01, subset=None):
         if subset is None:
@@ -1378,7 +1391,7 @@ class Plot2D(object):
             ax = self.axes[i]
             sp_a_r = self.data_object.find_spurion(data_index, reflection, spurion_type=spurion_type)
             sp_a_p = self.data_object.ub_matrix.convert(sp_a_r, 'rp')
-            return ax.scatter(sp_a_p[0], sp_a_p[1], zorder=20, edgecolor='r', facecolor='none')
+            ax.scatter(sp_a_p[0], sp_a_p[1], zorder=20, edgecolor='g', facecolor='none', lw=1)
 
 
     def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True):
@@ -1680,13 +1693,14 @@ def ask_directory(title='Choose a folder'):
 
 
 def list_flexx_files(path):
+    # type: (str) -> list
     """
     Lists all files named with 6 numbers and without extensions.
     :param path: Source path.
     :return: A list of file names.
     """
-    if path == '':
-        raise ValueError('Path \'%s\' is invalid.' % path)
+    if not os.path.isdir(path):
+        raise ValueError('Path \'%s\' is not a path.' % path)
     file_names = [os.path.join(path, s) for s in os.listdir(path) if (s.isdigit() and len(s) == 6)]
     file_names.sort(key=lambda fn: int(os.path.split(fn)[1]))
     return file_names

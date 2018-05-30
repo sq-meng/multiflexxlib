@@ -1,7 +1,7 @@
 # multiflexxlib
 Tools library for inelastic neutron spectroscopy detector array MultiFLEXX.
 ## Introduction
-`multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data from cold neutron continous angle multiple energy analysis (CAMEA) array detector MultiFLEXX. A detailed description on the detector can be found on [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html)
+`multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data measured with cold neutron array detector MultiFLEXX. A detailed description on the detector can be found on the [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html).
 
 ## Required Environment
 This package requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to make your life easier.
@@ -13,16 +13,16 @@ Alternately, Python2 > 2.7 is partially supported. Most of the code is written w
 run command `pip install multiflexxlib` from windows or linux command console.
 ## Usage
 ### Minimal Usage
-Download file [run.py](https://github.com/yumemi5k/multiflexxlib/blob/master/run.py) and save  somewhere. Double-click on saved file and subset the folder containing only your MultiFLEXX scan files when asked for data folder. All possible 2D const-E plots will be shown.
+Download the file [run.py](https://github.com/yumemi5k/multiflexxlib/blob/master/run.py) and save  somewhere. Double-click on saved file and subset the folder containing only your MultiFLEXX scan files when asked for data folder. All possible 2D const-E plots will be shown.
 ### Extended Usage
-Please also refer to docstrings of classes and functions, accessible through `help()` function, e.g. `help(mfl.UBMatrix)`. Please drop author a message if something is not explained well.
+Please also refer to docstrings of classes and functions, accessible through `help()` function, e.g. `help(mfl.UBMatrix)`.  
 
-It is possible and recommended to use this package in an interactive Python interpreter such as `IPython` or a Matlab-esque Python development environment like `Spyder`, which both come with default `Anaconda` installation.
+It is possible and recommended to use this package in an interactive Python interpreter such as `IPython` or a Matlab-esque Python development environment like `Spyder`, which both come with a default `Anaconda` installation.
 
 `import multiflexxlib as mfl`
 
 This is required before you can start using the package. `mfl` is a shorthand that you can also choose for yourself.
-
+#### Loading data
 `alldata = mfl.read_and_bin()`
 >Alternately, use `alldata = mfl.read_and_bin(processes=4)` to load data with multiple CPU cores simultaneously. This does not always work.
 
@@ -44,6 +44,7 @@ This prints a tabular summary.
 
 >The binning process considers any two values that are different by less than tolerance threshold to be identical. Defaults are energy: 0.05meV, temperature: 1K, angles 0.2&deg; and magnetic field 0.05T. Partially and fully repeating and overlapping scans will be dealt with in a sensible manner.
 
+#### Plotting data
 Let's suppose you want plots for data index number 0, 1, 2, 3 and 4:
 
 `p = alldata.plot(subset=[0,1,2,3,4])`
@@ -52,15 +53,25 @@ Plots can be panned and zoomed using controls in graph window.
 
 The returned `Plot2D` object can be used to access graph customization methods and 1D-cuts.
 
+It is common for accidental Bragg scattering spurions to exhibit much higher intensity than inelastic signals. To crop out such spurions:
+  
+`p.set_plim(pmin=0, pmax=99.7)`
+
+This limits dynamic range to 0.0% to 99.7%, ignoring the highest 0.3%.
+
+The users are encouraged to explore other available methods for graphical customization. 
+
+
+#### Cutting data
 It might be interesting to do a 1D-cut on 1st and 3rd plots, which is done as follows:
 
-`c = p.cut([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2])`
+`c = p.cut_voronoi([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2])`
 
 This does a cut through Voronoi partition of const-E data. Regions crossed by cut line are picked up and included in the cut. subset parameter can be omitted. `[1, 1, 1]` here is `[h, k, l]` values. `subset=[0, 2]` instead of `[1, 3]` because python index starts with `0`. This generates a cut from \[1, 1, 1\] to \[1.1, 1.1, 1\]. The `cut` method draws a line segment between specified cut start and end points, and each data point corresponding to crossed regions is subsequently projected onto cut axis.
 
 If you have enough data points, it makes more sense to do a traditional cut with rectangular bins:
 
-`c = p.cut([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2], no_points=21, ytol=[0, 0, 0.02])`
+`c = p.cut_bins([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2], no_points=21, ytol=[0, 0, 0.02])`
 
 Users are strongly recommended to refer to docstring on how to define bin size.
 
@@ -69,6 +80,8 @@ To plot a Q-E dispersion plot:
 `df.dispersion([1, 1, 1], [1.1, 1.1, 1], no_points=21)`
 
 This generates a vertical stacking of 1D const-E cuts. It should be noted that data from all final energies is used, thus intensity might zigzag from resolution effects.
+
+#### Exporting data
 
 To export all data into CSV files:
 
