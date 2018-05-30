@@ -12,7 +12,7 @@ Alternately, Python2 > 2.7 is partially supported. Most of the code is written w
 
 ### Ask me anything!
 
-If you are unsure about how to do something or are getting unexpected behaviour, opening an issue in Github or dropping me an email are 
+If you are unsure about how to do something or are getting unexpected behaviour, open an issue or drop me an email!
 
 ## Installation
 run command `pip install multiflexxlib` from windows or linux command console.
