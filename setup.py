@@ -1,8 +1,18 @@
 from setuptools import setup
+import re
 import os
 _here = os.path.abspath(os.path.dirname(__file__))
 with open(os.path.join(_here, 'README.md')) as f:
     pass
+
+VERSIONFILE = 'multiflexxlib/_version.py'
+with open(VERSIONFILE) as version_file:
+    version_py = version_file.read()
+    version_match = re.search(r"^__version__[ ]?=[ ]?['\"]([^'\"]*)['\"]", version_py, re.M)
+    if version_match:
+        __version__ = version_match.group(1)
+    else:
+        raise ValueError('Unable to load version number from %s' % VERSIONFILE)
 
 requires = ['pyclipper>=1.1.0',
             'numpy>=1.14',
@@ -12,7 +22,7 @@ requires = ['pyclipper>=1.1.0',
             'pytest']
 
 setup(name='multiflexxlib',
-      version='0.3.0',
+      version=__version__,
       description='Tools library for CAMEA neutron detector MultiFLEXX',
       long_description='See github page',
       url='http://github.com/sq-meng/multiflexxlib',

@@ -4,7 +4,7 @@ Tools library for inelastic neutron spectroscopy detector array MultiFLEXX.
 `multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data measured with cold neutron array detector MultiFLEXX. A detailed description on the detector can be found on the [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html).
 
 ## Required Environment
-This package requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to make your life easier.
+`multiflexxlib` requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to make your life easier.
 
 Alternately, Python2 > 2.7 is partially supported. Most of the code is written with Python 2 compatibility in mind, but might contain (additional) bugs.
 

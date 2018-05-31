@@ -21,9 +21,9 @@ from matplotlib.widgets import Button, TextBox
 from mpl_toolkits.axisartist import Subplot
 from mpl_toolkits.axisartist.grid_helper_curvelinear import GridHelperCurveLinear
 import pickle
-import warnings
 import os
 import pkg_resources
+from multiflexxlib._version import __version__
 
 try:
     import tkinter
@@ -200,7 +200,7 @@ def ub_from_header(scan_header):
 class Scan(object):
     """
     Reads a TASMAD scan file, extracts metadata and do essential conversions. Assumes const-Ei scan!
-    Should not be instantiated by directly invoking constructor. Use read_mf_scan() or read_mf_scans() instead.
+    Usually not instantiated on its own. Use read_mf_scan() or read_mf_scans() instead.
     """
     def __init__(self, file_name, ub_matrix=None, intensity_matrix=None, a3_offset=0.0, a4_offset=0.0):
         """
@@ -431,7 +431,7 @@ class Scan(object):
         return a4_start, a4_end_actual, a4_end_planned
 
     def to_csv(self, file_name=None, channel=None):
-        pass
+        raise NotImplementedError('Not yet implemented, please export from BinnedData class instead.')
 
 
 def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
@@ -441,6 +441,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=Tr
     :param tolerance: maximum difference in value for considering two points to be the same.
     :param strategy: (str, iterable) 'adaptive' to bin points based on proximity, 'regular' to bin points into a regular
     set of bins. Provide an iterable to manually set bin EDGES.
+    :param detect_diffuse: Raise an exception if a bin is striding over a diffuse group of points.
     :return: a list of bin edges
 
     Walks through sorted unique values, if a point is further than tolerance away from the next, a bin edge is
@@ -794,6 +795,12 @@ class BinnedData(object):
                               self.data[['locus_a', 'locus_p', 'points']].astype('str')), axis=1))
 
     def update_voronoi(self, indices=None, angle_voronoi=False):
+        """
+        Update Voronoi tessellation polygons.
+        :param indices: Which entries to update. Omit to update all.
+        :param angle_voronoi: Whether to perform Voronoi tessellation in angles instead of absolute reciprocal lengths.
+        :return: None
+        """
         if indices is None:
             indices = self.data.index
         elif isinstance(indices, int):
@@ -822,7 +829,7 @@ class BinnedData(object):
 
     def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True, plot=True):
         """
-        1D-cut through specified start and end points.
+        1D-cut through specified start and end points by cutting through Voronoi tessellation polygons.
         :param start: starting point in r.l.u., vector.
         :param end: ending point in r.l.u., vector.
         :param subset: a list of indices to cut. Omit to cut all available data.
@@ -870,11 +877,11 @@ class BinnedData(object):
         :param start: starting point in r.l.u., vector.
         :param end: ending point in r.l.u., vector.
         :param subset: a list of indices to cut. Omit to cut all available data.
-        :param xtol: Bin size along cutting axis, in absolute reciprocal length.
-        :param ytol: Lateral half bin size in [h, k, l] or absolute reciprocal length.
+        :param xtol: Bin size along cutting axis, in absolute reciprocal length in inverse Angstrom.
+        :param ytol: Lateral half bin size in [h, k, l], or absolute reciprocal length in inverse Angstrom.
         :param no_points: Number of bins along cutting axis.
         :param label_precision: refer to make_label method.
-        :param labels: refer to make_label method.
+        :param labels: Number of decimals in labels. Refer to make_label method..
         :param plot: Automatically spawns a plot if true.
         :return: ConstECut object.
         """
@@ -1393,14 +1400,13 @@ class Plot2D(object):
             sp_a_p = self.data_object.ub_matrix.convert(sp_a_r, 'rp')
             ax.scatter(sp_a_p[0], sp_a_p[1], zorder=20, edgecolor='g', facecolor='none', lw=1)
 
-
     def cut_voronoi(self, start, end, subset=None, label_precision=2, labels=None, monitor=True):
         """
         1D-cut through specified start and end points.
         :param start: starting point in r.l.u., vector.
         :param end: ending point in r.l.u., vector.
         :param subset: a list of indices to cut. Omit to cut all available data.
-        :param label_precision: refer to make_label method.
+        :param label_precision: Number of decimals in labels. Refer to make_label method..
         :param labels: refer to make_label method.
         :param monitor: if normalize by monitor count.
         :return: ECut object.
@@ -1421,7 +1427,7 @@ class Plot2D(object):
         :param xtol: Bin size along cutting axis, in absolute reciprocal length.
         :param ytol: Lateral half bin size in [h, k, l] or absolute reciprocal length.
         :param no_points: Number of bins along cutting axis.
-        :param label_precision: refer to make_label method.
+        :param label_precision: Number of decimals in labels. Refer to make_label method..
         :param labels: refer to make_label method.
         :param plot: Automatically spawns a plot if true.
         :return: ConstECut object.
@@ -1827,3 +1833,7 @@ def load(file_name=None):
         raise IOError('Error accessing dump file %s' % file_name)
     else:
         return pickle.load(file)
+
+
+def version():
+    return __version__

@@ -5,7 +5,6 @@ import pyclipper
 import multiflexxlib.ub as ub
 from matplotlib.collections import PatchCollection
 from matplotlib.patches import Polygon
-from numba import jit
 
 
 def voronoi_polygons(x, y=None, aspect=1, max_cell=0.1):
