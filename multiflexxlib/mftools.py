@@ -499,19 +499,50 @@ def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=
     joined_frames = pd.concat(data_frames, axis=0, ignore_index=True)
     joined_frames = joined_frames.assign(counts_norm=joined_frames.counts/joined_frames.coeff)
     joined_frames = joined_frames.drop(joined_frames[joined_frames.valid != 1].index)  # delete dead detectors
-
     a3_cuts = bin_and_cut(joined_frames.A3, tolerance=a3_tolerance, strategy=a3_bins)
-    a4_cuts = bin_and_cut(joined_frames.A4, tolerance=a4_tolerance, strategy=a4_bins)
+    try:
+        a4_cuts = bin_and_cut(joined_frames.A4, tolerance=a4_tolerance, strategy=a4_bins)
+        result = _decoupled_angle_merge(joined_frames, a3_cuts, a4_cuts)
+        return result
+    except ValueError:
+        result = _coupled_angle_merge(joined_frames, a3_tolerance, a3_bins, a4_tolerance, a4_bins)
+        return result
+
+
+def _decoupled_angle_merge(joined_frames, a3_cuts, a4_cuts):
+    # helper function for merging scan points. Used if A3 and A4 angles can be binned independently.
     group = joined_frames.groupby([a3_cuts, a4_cuts])
     sums = group['counts', 'counts_norm', 'MON'].sum()
     means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
     error_bars = np.sqrt(sums.counts)
     per_monitor = sums.counts_norm / sums.MON
     result = pd.concat([sums, means], axis=1)
-    result = result.assign(err=error_bars)
-    result = result.assign(permon=per_monitor)
-    result = result.dropna()
-    return result.reset_index(drop=True)
+    result = result.assign(err=error_bars, permon=per_monitor)
+    result = result.dropna().reset_index(drop=True)
+    return result
+
+
+def _coupled_angle_merge(joined_frames, a3_tolerance, a3_bins, a4_tolerance, a4_bins):
+    # Used if A4 angle has a non-zero step that is smaller than precision, and there are enough steps to make A4 angles
+    # seem 'continuous'. MUCH SLOWER than decoupled binning!
+    a3_bin_edges = make_bin_edges(joined_frames.A3, tolerance=a3_tolerance, strategy=a3_bins)
+    fragments = []
+    for i in range(len(a3_bin_edges) - 1):
+        a3_left = a3_bin_edges[i]
+        a3_right = a3_bin_edges[i+1]
+        filtered = joined_frames.loc[joined_frames.A3.between(a3_left, a3_right)]
+        a4_cuts = bin_and_cut(filtered.A4, tolerance=a4_tolerance, strategy=a4_bins)
+        group = filtered.groupby([a4_cuts])
+        sums = group['counts', 'counts_norm', 'MON'].sum()
+        means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
+        error_bars = np.sqrt(sums.counts)
+        per_monitor = sums.counts_norm / sums.MON
+        fragment = pd.concat([sums, means], axis=1)
+        fragment = fragment.assign(err=error_bars, permon=per_monitor)
+        fragment = fragment.dropna().reset_index(drop=True)
+        fragments.append(fragment)
+    result = pd.concat(fragments, axis=0).reset_index(drop=True)
+    return result
 
 
 def bin_and_cut(data, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
