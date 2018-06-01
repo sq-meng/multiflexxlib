@@ -32,6 +32,14 @@ except ImportError:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
 
+import logging
+import sys
+logger = logging.getLogger()
+logger.setLevel('INFO')
+logger.addHandler(logging.StreamHandler(sys.stdout))
+
+BIN_ADAPTIVE = 'adaptive'
+BIN_REGULAR = 'regular'
 
 NUM_CHANNELS = 31
 EF_LIST = [2.5, 3.0, 3.5, 4.0, 4.5]
@@ -434,7 +442,7 @@ class Scan(object):
         raise NotImplementedError('Not yet implemented, please export from BinnedData class instead.')
 
 
-def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
+def make_bin_edges(values, tolerance=0.2, strategy=BIN_ADAPTIVE, detect_diffuse=True):
     # type: ((list, pd.Series), float) -> list
     """
     :param values: An iterable list of all physical quantities, repetitions allowed.
@@ -449,7 +457,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=Tr
     tolerance / 2 further from either end.
     """
     if isinstance(strategy, str):
-        if strategy == 'adaptive':
+        if strategy == BIN_ADAPTIVE:
             values_array = np.asarray(values).ravel()
             unique_values = np.asarray(list(set(values_array)))
             unique_values.sort()
@@ -466,7 +474,7 @@ def make_bin_edges(values, tolerance=0.2, strategy='adaptive', detect_diffuse=Tr
 
             bin_edges.append(unique_values[-1] + tolerance / 2)
             return bin_edges
-        elif strategy == 'regular':
+        elif strategy == BIN_REGULAR:
             values_array = np.asarray(values).ravel()
             unique_values = np.asarray(list(set(values_array)))
             unique_values.sort()
@@ -489,11 +497,12 @@ def _merge_locus(locus_list):
     return merged_locus
 
 
-def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins='adaptive', a4_bins='adaptive'):
+def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=BIN_ADAPTIVE, a4_bins=BIN_ADAPTIVE):
     """
     Bins actual detector counts together from multiple runs.
     :param data_frames: Pandas data frames from Scan objects.
-    :param angle_tolerance: Max angle difference before two angles are considered discreet.
+    :param a3_tolerance: Max angle difference before two A3 angles are considered discreet.
+    :param a4_tolerance: See a3_tolerance.
     :return: An intermediate data structure even I don't really remember.
     """
     joined_frames = pd.concat(data_frames, axis=0, ignore_index=True)
@@ -504,9 +513,12 @@ def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=
         a4_cuts = bin_and_cut(joined_frames.A4, tolerance=a4_tolerance, strategy=a4_bins)
         result = _decoupled_angle_merge(joined_frames, a3_cuts, a4_cuts)
         return result
-    except ValueError:
-        result = _coupled_angle_merge(joined_frames, a3_tolerance, a3_bins, a4_tolerance, a4_bins)
-        return result
+    except ValueError as err:  # If A4 is diffused across entire range due to small yet non-zero A4 step.
+        if type(a4_bins) is str:
+            if a4_bins == BIN_ADAPTIVE:  # Decided not to rely on 'and' condition shortcut.
+                result = _coupled_angle_merge(joined_frames, a3_tolerance, a3_bins, a4_tolerance, a4_bins)
+                return result
+        raise err
 
 
 def _decoupled_angle_merge(joined_frames, a3_cuts, a4_cuts):
@@ -545,7 +557,7 @@ def _coupled_angle_merge(joined_frames, a3_tolerance, a3_bins, a4_tolerance, a4_
     return result
 
 
-def bin_and_cut(data, tolerance=0.2, strategy='adaptive', detect_diffuse=True):
+def bin_and_cut(data, tolerance=0.2, strategy=BIN_ADAPTIVE, detect_diffuse=True):
     # type: (pd.Series, float) -> Categorical
     """
     Applies adaptive binning and return a pandas.Categorical cut object
@@ -573,7 +585,8 @@ def series_to_binder(items):
 def bin_scans(list_of_data,  # type: ['Scan']
               nan_fill=0, ignore_ef=False,
               en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, a3_tolerance=0.2, a4_tolerance=0.2,
-              en_bins='adaptive', tt_bins='adaptive', mag_bins='adaptive', a3_bins='adaptive', a4_bins='adaptive',
+              en_bins=BIN_ADAPTIVE, tt_bins=BIN_ADAPTIVE, mag_bins=BIN_ADAPTIVE, a3_bins=BIN_ADAPTIVE,
+              a4_bins=BIN_ADAPTIVE,
               angle_voronoi=False):
     # type: (...)-> BinnedData
     """
@@ -707,7 +720,8 @@ def _expand_offset_parameter(param, filename_list):
 
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
                  en_tolerance=0.05, tt_tolerance=1.0, mag_tolerance=0.05, a3_tolerance=0.2, a4_tolerance=0.2,
-                 en_bins='adaptive', tt_bins='adaptive', mag_bins='adaptive', a3_bins='adaptive', a4_bins='adaptive',
+                 en_bins=BIN_ADAPTIVE, tt_bins=BIN_ADAPTIVE, mag_bins=BIN_ADAPTIVE, a3_bins=BIN_ADAPTIVE,
+                 a4_bins=BIN_ADAPTIVE,
                  a3_offset=None, a4_offset=None, angle_voronoi=False):
     """
     Reads and bins MultiFLEXX scan files.
@@ -786,7 +800,7 @@ class _MergedLocus(list):
 
 class _MergedDataPoints(pd.DataFrame):
     # Helper class to override __str__ behaviour.
-    def __init__(self, items, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins='adaptive', a4_bins='adaptive'):
+    def __init__(self, items, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=BIN_ADAPTIVE, a4_bins=BIN_ADAPTIVE):
         # type: (_DataBinder, float) -> None
         binned_points = _merge_scan_points(items, a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance,
                                            a3_bins=a3_bins, a4_bins=a4_bins)
@@ -1215,7 +1229,7 @@ class ConstECut(object):
         """
         if len(self.cuts) > 1:
             # Solely to shift responsibility of managing files to user.
-            raise NotImplementedError('Saving to CSV only supported for cuts only containing 1 set of data.')
+            raise NotImplementedError('Saving to CSV only supported for cuts containing one single set of data.')
         file = filedialog.asksaveasfile(initialdir=self.data_object.save_folder, defaultextension='.csv',
                                         filetypes=(('comma-separated values', '.csv'), ))
         if file is None:
