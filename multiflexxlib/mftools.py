@@ -461,17 +461,17 @@ def make_bin_edges(values, tolerance=0.2, strategy=BIN_ADAPTIVE, detect_diffuse=
             values_array = np.asarray(values).ravel()
             unique_values = np.asarray(list(set(values_array)))
             unique_values.sort()
-            bin_edges = [unique_values[0] - tolerance / 2]
+            bin_edges = [unique_values[0] - tolerance / 2]  # First bin edge should be to the 'left' of smallest value.
             current_walk = 0
             for i in range(len(unique_values) - 1):
-                if unique_values[i+1] - unique_values[i] > tolerance:
+                if unique_values[i+1] - unique_values[i] > tolerance:  # New bin edge if two points further than tol.
                     bin_edges.append((unique_values[i] + unique_values[i+1]) / 2)
                     current_walk = 0
                 else:
+                    # Keep track of how much this bin is spanning.
                     current_walk = current_walk + unique_values[i+1] - unique_values[i]
                 if current_walk > 2 * tolerance and detect_diffuse:
                     raise ValueError('Bin edge creation failed due to diffuse clustering of values.')
-
             bin_edges.append(unique_values[-1] + tolerance / 2)
             return bin_edges
         elif strategy == BIN_REGULAR:
@@ -482,10 +482,10 @@ def make_bin_edges(values, tolerance=0.2, strategy=BIN_ADAPTIVE, detect_diffuse=
             bin_edges.append(unique_values[-1] + tolerance / 2)
             return bin_edges
         else:
-            raise ValueError('Invalid binning strategy provided: (\'adaptive\', \'regular\', list) expected, got %s',
-                             strategy)
-    else:
-        return [x for x in strategy]
+            raise ValueError('Invalid binning strategy provided: (\'%s \', \'%s\', list) expected, got %s' %
+                             (BIN_ADAPTIVE, BIN_REGULAR, strategy))
+    else:  # if strategy is not a string
+        return [x for x in strategy]  # it will at least be an iterable
 
 
 def _merge_locus(locus_list):
@@ -867,7 +867,7 @@ class BinnedData(object):
                 lop_angle = plotting.voronoi_polygons(points['A3'], points['A4'],
                                                       self.ub_matrix.figure_aspect, max_cell=2.5)
                 lop_p = [angle_to_q(etok(self.data.ei[ind]), etok(self.data.ef[ind]),
-                                                    poly[:, 0], poly[:, 1], system='p') for poly in lop_angle]
+                                    poly[:, 0], poly[:, 1], system='p') for poly in lop_angle]
                 lop_p_filtered = [poly.T[:, 0:2] for poly in lop_p]
                 self.data.loc[ind, 'voro'][:] = []
                 self.data.loc[ind, 'voro'].extend(lop_p_filtered)
@@ -1474,7 +1474,6 @@ class Plot2D(object):
         :param no_points: Number of bins along cutting axis.
         :param label_precision: Number of decimals in labels. Refer to make_label method..
         :param labels: refer to make_label method.
-        :param plot: Automatically spawns a plot if true.
         :return: ConstECut object.
         """
         if subset is None:

@@ -26,7 +26,7 @@ class UBMatrix(object):
     UB-matrix handling object. Can be compared to each other using == operator to check if all settings are identical.
     Example: Hexagonal crystal with a = 4.05A, c = 11.05A, aligned on hkl1 = [1 0 0] and hkl2 = [0 1 0], we want x axis
     to be [1 1 0] and y axis to be [1 -1 0]
-    UBMatrix([4.05, 4.05, 11.05, 90, 90, 120], [1, 0, 0], [0, 1, 0], [1, 1, 0], [1, -1, 0])
+    >>>UBMatrix([4.05, 4.05, 11.05, 90, 90, 120], [1, 0, 0], [0, 1, 0], [1, 1, 0], [1, -1, 0])
     """
     def __init__(self, latparam, hkl1, hkl2, plot_x=None, plot_y=None, a3_add=0.0, a4_add=0.0):
         """
@@ -223,7 +223,7 @@ class UBMatrix(object):
         :param other: UBMatrix to be checked against
         :return: bool
         """
-        # type: (UBMatrix) -> bool
+        # type: UBMatrix -> bool
         if not isinstance(other, UBMatrix):
             raise TypeError('UBMatrix can only be checked for equality with another UBMatrix.')
         latparam_eq = np.all(self.latparam == other.latparam)
@@ -275,7 +275,7 @@ def guess_axes_labels(hkl1, hkl2):
     hkl2_nonzero = [not np.isclose(x, 0) for x in hkl2]
 
     if hkl1_nonzero.count(True) == 0 or hkl2_nonzero.count(True) == 0:
-        raise ValueError('guess axis labels: axis supplied is all zeroes.')
+        raise ValueError('guess axis labels: axes supplied are all zeroes.')
     if hkl2_nonzero.count(True) == 1:  # axis with only one component gets precedence
         symbol_y = labels[hkl2_nonzero.index(True)]
         if labels[hkl1_nonzero.index(True)] != symbol_y:  # check if same symbol used twice
@@ -383,6 +383,12 @@ def angle_to_q(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0, system='s', ub_matrix=Non
 
 
 def v1_to_v2(v1, v2):
+    """
+    Finds angle from v1 to v2.
+    :param v1: 3-element vector v1.
+    :param v2: 3-element vector v2.
+    :return: angle in radians.
+    """
     norm = np.linalg.norm
     cosine = np.dot(v1, v2) / (norm(v1) * norm(v2))
     acos = np.arccos(cosine)
@@ -397,8 +403,8 @@ def find_a3_a4(q, ki, kf, ub_matrix, system='r', sense=1):
     """
     Finds A3 and A4 angle for given vector.
     :param q: 3-element Q vector. Does not accept a list of vectors.
-    :param ki: ki
-    :param kf: kf
+    :param ki: ki in inverse Angstrom.
+    :param kf: kf in inverse Angstrom.
     :param ub_matrix: UBMatrix object.
     :param system: In which system is the vector given. r for reciprocal vectors.
     :param sense: Scattering sense, +1 for CCW scattering
