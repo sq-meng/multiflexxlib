@@ -32,6 +32,7 @@ except ImportError:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
 
+
 import logging
 import sys
 logger = logging.getLogger()
@@ -101,10 +102,8 @@ def _extract_ki_from_header(en, fx, kfix):
 def _number_to_scan(num):
     if isinstance(num, int):
         return '{:06d}'.format(num)
-    elif isinstance(num, str):
-        return num
     else:
-        raise TypeError('Expecting a number or a numeric string to convert to FLEXX scan file number.')
+        return num
 
 
 def _parse_flatcone_line(line):
