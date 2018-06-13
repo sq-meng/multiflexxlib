@@ -16,6 +16,9 @@ If you are unsure about how to do something or are getting unexpected behaviour,
 
 ## Installation
 run command `pip install multiflexxlib` from windows or linux command console.
+
+## Sample data
+Data files for measurement of excitations in antiferromagnet MnF<sub>2</sub> can be found [here](https://github.com/sq-meng/multiflexxlib/tree/master/sampledata/MnF2). Please download the files into a folder.
 ## Usage
 ### Minimal Usage
 Download the file [run.py](https://github.com/yumemi5k/multiflexxlib/blob/master/run.py) and save  somewhere. Double-click on saved file and subset the folder containing only your MultiFLEXX scan files when asked for data folder. All possible 2D const-E plots will be shown.
