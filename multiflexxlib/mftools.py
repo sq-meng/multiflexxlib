@@ -997,8 +997,8 @@ class BinnedData(object):
         c = self.cut_bins(start=start, end=end, subset=indices, no_points=no_points, plot=False)
         return c.vstack(colorbar)
 
-    def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True):
-        # type: (..., list, int, float, str, bool) -> 'Plot2D'
+    def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True, double_click=False):
+        # type: (..., list, int, float, str, bool, bool) -> 'Plot2D'
         """
         Generate const-E colormaps.
         :param subset: list, indices of entries to be plotted. Omit to plot all.
@@ -1008,10 +1008,11 @@ class BinnedData(object):
         :param plot_type: String. 'v': Voronoi, 'm': Mesh, 's': Scatter, 'd' Delaunay interpolation. Will be cycled for
         all plots. e.g. 'vm' will alternate between Voronoi patches and mesh.
         :param controls: True to show controls on screen.
+        :param double_click: Whether to attach double-click to open new plot event.
         :return: Plot2D object.
         """
         plot_object = Plot2D(data_object=self, subset=subset, cols=cols, aspect=aspect, style=plot_type,
-                             controls=controls)
+                             controls=controls, double_click=double_click)
         return plot_object
 
     def make_label(self, index, multiline=False, precision=2, columns=None):
@@ -1370,7 +1371,8 @@ class Plot2D(object):
     """
     2D const-E plots. Should not be instantiated by invoking its constructor.
     """
-    def __init__(self, data_object, subset=None, cols=None, aspect=None, style=None, controls=False):
+    def __init__(self, data_object, subset=None, cols=None, aspect=None, style=None, controls=False,
+                 double_click=False):
         if subset is None:
             subset = data_object.data.index
         if style is None:
@@ -1379,7 +1381,9 @@ class Plot2D(object):
         ub_matrix = self.data_object.ub_matrix
         rows, cols = _calc_figure_dimension(len(subset), cols)
         self.f, axes = _init_2dplot_figure(rows, cols, ub_matrix)
-        self.axes = axes.reshape(-1)
+        self.axes = list(axes.reshape(-1))
+        if double_click:
+            self.__attach_click_event__()
         self._set_hkl_formatter()
         self.patches = None
         self.indices = subset
@@ -1399,6 +1403,10 @@ class Plot2D(object):
         for ax in self.axes:
             ax.format_coord = format_coord
 
+    @staticmethod
+    def __unpack_format_char__(nth, style):
+        return style[nth % len(style)]
+
     def __plot__(self, style):
         self.patches = []
         if self.aspect is None:
@@ -1410,7 +1418,7 @@ class Plot2D(object):
             ax.grid(linestyle='--', zorder=0)
             ax.set_axisbelow(True)
             record = self.data_object.data.loc[index, :]
-            method_char = style[nth % len(style)]
+            method_char = self.__unpack_format_char__(nth, style)
             if method_char == 'v':
                 self.patches.append(draw_voronoi_patch(ax, record))
             elif method_char == 'd':
@@ -1549,8 +1557,9 @@ class Plot2D(object):
         :param vmax: vmax
         :return:
         """
-        for p in self.patches:
-            p.set_clim((vmin, vmax))
+        for patch in self.patches:
+            patch.set_clim((vmin, vmax))
+            plt.draw()
 
     def set_plim(self, pmin=0, pmax=100):
         """
@@ -1588,6 +1597,29 @@ class Plot2D(object):
         button = Button(ax, 'Linear')
         self.controls['linear'] = button
         button.on_clicked(lambda event: self.set_linear())
+
+    def __attach_click_event__(self):
+        """
+        Attaches double-click to open new window event. Mostly useful for non-scripted use on huge datasets.
+        :return: none
+        """
+        def handler(event):
+            if not event.dblclick:
+                return
+            ax = event.inaxes
+            if ax is None:
+                return
+            nth = self.axes.index(ax)
+            try:
+                index = self.indices[nth]
+                patch = self.patches[nth]
+            except IndexError:
+                return
+            p = Plot2D(self.data_object, subset=[index], controls=True)
+            clim = patch.get_clim()
+            p.set_clim(clim[0], clim[1])
+
+        self.f.canvas.mpl_connect('button_press_event', handler)
 
 
 def draw_voronoi_patch(ax, record, mesh=False, zorder=10):
