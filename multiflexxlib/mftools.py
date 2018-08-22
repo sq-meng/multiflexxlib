@@ -1,4 +1,7 @@
 from __future__ import division
+
+import matplotlib
+matplotlib.use('TkAgg')
 import multiprocessing as mp
 import itertools
 import numpy as np
@@ -12,8 +15,6 @@ from multiflexxlib import plotting
 from multiflexxlib import ub
 from multiflexxlib.ub import UBMatrix, etok, ktoe, angle_to_q
 import pyclipper
-import matplotlib
-matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
@@ -23,6 +24,7 @@ from matplotlib.widgets import Button, TextBox
 from mpl_toolkits.axisartist import Subplot
 from mpl_toolkits.axisartist.grid_helper_curvelinear import GridHelperCurveLinear
 import pickle
+import sys
 import os
 import pkg_resources
 from multiflexxlib._version import __version__
@@ -34,9 +36,8 @@ except ImportError:
     import Tkinter as tkinter
     import tkFileDialog as filedialog
 
-
 import logging
-import sys
+
 
 logger = logging.getLogger()
 logger.setLevel('INFO')
@@ -253,7 +254,8 @@ class Scan(object):
 
         self.converted_dataframes = []
         self._update_data_array()
-        print('finished loading %s, a3_offset = %.2f, a4_offset = %.2f' % (file_name, self.a3_offset, self.a4_offset))
+        print('finished loading %s, a3_offset = %.2f, a4_offset = %.2f' %
+                    (file_name, self.a3_offset, self.a4_offset))
 
     @property
     def ki(self):
@@ -325,21 +327,21 @@ class Scan(object):
 
     @a3_offset.setter
     def a3_offset(self, value):
-        a3o_old = self.a3_offset
-        a3o_new = value
-        a3_add = a3o_new - a3o_old
+        a3_offset_old = self.a3_offset
+        a3_offset_new = value
+        a3_add = a3_offset_new - a3_offset_old
         self._apply_offsets(a3_add, 0.0)
         self._update_data_array()
-        self._a3_offset = a3o_new
+        self._a3_offset = a3_offset_new
 
     @a4_offset.setter
     def a4_offset(self, value):
-        a4o_old = self.a3_offset
-        a4o_new = value
-        a4_add = a4o_new - a4o_old
+        a4_offset_old = self.a3_offset
+        a4_offset_new = value
+        a4_add = a4_offset_new - a4_offset_old
         self._apply_offsets(0.0, a4_add)
         self._update_data_array()
-        self._a4_offset = a4o_new
+        self._a4_offset = a4_offset_new
 
     @property
     def planned_locus_list(self):
@@ -770,7 +772,7 @@ def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, proc
             filename_list = list_flexx_files(filename_list)
             items = read_mf_scans(filename_list, ub_matrix, intensity_matrix, processes, a3_offset, a4_offset)
         else:
-            raise ValueError('%s: Got a parameter that is neither a list nor a directory')
+            raise ValueError('Got a parameter that is neither a list nor a directory (got %s)' % str(filename_list))
     df = bin_scans(items, en_tolerance=en_tolerance, tt_tolerance=tt_tolerance, mag_tolerance=mag_tolerance,
                    a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance, en_bins=en_bins, tt_bins=tt_bins,
                    mag_bins=mag_bins, a3_bins=a3_bins, a4_bins=a4_bins, angle_voronoi=angle_voronoi)
@@ -1000,7 +1002,7 @@ class BinnedData(object):
         c = self.cut_bins(start=start, end=end, subset=indices, no_points=no_points, plot=False)
         return c.vstack(colorbar)
 
-    def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True, double_click=False):
+    def plot(self, subset=None, cols=None, aspect=None, plot_type=None, controls=True, double_click=True):
         # type: (..., list, int, float, str, bool, bool) -> 'Plot2D'
         """
         Generate const-E colormaps.
@@ -1632,7 +1634,7 @@ class Plot2D(object):
                 patch = self.patches[nth]
             except IndexError:
                 return
-            p = Plot2D(self.data_object, subset=[index], controls=True)
+            p = Plot2D(self.data_object, subset=[index], controls=True, double_click=False)
             clim = patch.get_clim()
             p.set_clim(clim[0], clim[1])
 
@@ -1915,9 +1917,12 @@ def load(file_name=None):
     :return: BinnedData object.
     """
     # type: str -> BinnedData
+    root = tkinter.Tk()
+    root.withdraw()
     if file_name is None:
-        file = filedialog.askopenfile(defaultextension='.dmp', mode='rb',
+        file = filedialog.askopenfile(parent=root, defaultextension='.dmp', mode='rb',
                                       filetypes=(('multiflexxlib dump', '.dmp'),))
+        root.destroy()
     else:
         file = open(file_name, 'rb')
 
@@ -1925,6 +1930,10 @@ def load(file_name=None):
         raise IOError('Error accessing dump file %s' % file_name)
     else:
         return pickle.load(file)
+
+
+def cleanup():
+    pass
 
 
 def version():
