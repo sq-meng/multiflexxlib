@@ -12,6 +12,8 @@ from multiflexxlib import plotting
 from multiflexxlib import ub
 from multiflexxlib.ub import UBMatrix, etok, ktoe, angle_to_q
 import pyclipper
+import matplotlib
+matplotlib.use('TkAgg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
@@ -35,6 +37,7 @@ except ImportError:
 
 import logging
 import sys
+
 logger = logging.getLogger()
 logger.setLevel('INFO')
 logger.addHandler(logging.StreamHandler(sys.stdout))
@@ -1579,6 +1582,20 @@ class Plot2D(object):
 
             self.patches[i].set_clim((vmin, vmax))
 
+    def auto_lim(self):
+        """
+        Automatically clips out spurion pixels.
+        :return:
+        """
+        for i in range(len(self.indices)):
+            index = self.indices[i]
+            data = self.data_object.data.loc[index, 'points'].counts_norm
+            data_max = np.max(data)
+            pmax = plotting.find_spurion_cutoff(data)
+            pmax_value = np.percentile(data, pmax, interpolation='linear')
+            vmax = pmax_value / data_max
+            self.patches[i].set_clim((0, vmax))
+
     def add_controls(self):
         """
         Adds control buttons to figure.
@@ -1631,7 +1648,7 @@ def draw_voronoi_patch(ax, record, mesh=False, zorder=10):
     :param zorder: zorder to be used for artist.
     :return: PathCollection
     """
-    # TODO: Check zorder operation
+    # TODO: Check zorder behaviour
     values = record.points.permon / record.points.permon.max() + 1e-10  # to avoid drawing zero counts as empty
     v_fill = plotting.draw_patches(record.voro, values, mesh=mesh, zorder=zorder)
     coverage_patch = _draw_coverage_mask(ax, record.locus_a)
@@ -1768,7 +1785,7 @@ def ask_directory(title='Choose a folder'):
     """
     root = tkinter.Tk()
     root.withdraw()
-    path = filedialog.askdirectory(initialdir='.', title=title)
+    path = filedialog.askdirectory(parent=root, initialdir='.', title=title)
     root.destroy()
     return path
 

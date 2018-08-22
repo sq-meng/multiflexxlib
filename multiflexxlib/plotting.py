@@ -193,3 +193,20 @@ def draw_line(ax, points, ub_matrix, sys='r'):
     # type: (..., (np.ndarray, list), ub.UBMatrix, str) -> ...
     points_p = ub_matrix.convert(points, sys=sys+'p', axis=0)
     return ax.plot(points_p[:, 0], points_p[:, 1])
+
+
+def find_spurion_cutoff(values, step_length=0.01, gradient_ratio=50):
+    values = np.asarray(values)
+    value_max = values.max()
+    gradient_ratio = gradient_ratio * step_length / 100
+    for i in range(int(3 // step_length)):
+        delta = np.percentile(a=values, q=100 - i * step_length, interpolation='linear') - \
+                np.percentile(a=values, q=100 - (i + 1) * step_length, interpolation='linear')
+        if delta / value_max > gradient_ratio:
+            for j in range(i, int(3 // step_length)):
+                delta = np.percentile(values, q=100 - j * step_length, interpolation='linear') - \
+                        np.percentile(values, q=100 - (j + 1) * step_length, interpolation='linear')
+                if delta / value_max < gradient_ratio:
+                    cutoff = 100 - j * step_length
+                    return cutoff
+    return 100  # no cutoff found
