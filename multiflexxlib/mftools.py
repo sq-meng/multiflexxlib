@@ -1380,6 +1380,10 @@ class Plot2D(object):
                  double_click=False):
         if subset is None:
             subset = data_object.data.index
+        elif isinstance(subset, int):
+            subset = [subset, ]
+        else:
+            pass
         if style is None:
             style = 'v'
         self.data_object = data_object
@@ -1555,6 +1559,14 @@ class Plot2D(object):
         self.set_norm(None)
         self.set_clim(vmin, vmax)
 
+    def set_auto_lim(self):
+        """
+        Set auto spurion level clipping.
+        :return:
+        """
+        self.set_norm(None)
+        self.auto_lim()
+
     def set_clim(self, vmin, vmax):
         """
         Sets limits to colormaps.
@@ -1606,16 +1618,22 @@ class Plot2D(object):
         self.f.subplots_adjust(bottom=0.2)
         row_pos = 0
         # LogNorm
-        ax = self.f.add_axes([row_pos * 0.1 + 0.1, 0.05, 0.09, 0.05])
+        ax = self.f.add_axes([row_pos * 0.12 + 0.1, 0.05, 0.11, 0.05])
         button = Button(ax, 'Log')
         self.controls['log'] = button
         button.on_clicked(lambda event: self.set_lognorm())
         # Linear
         row_pos += 1
-        ax = self.f.add_axes([row_pos * 0.1 + 0.1, 0.05, 0.09, 0.05])
+        ax = self.f.add_axes([row_pos * 0.12 + 0.1, 0.05, 0.11, 0.05])
         button = Button(ax, 'Linear')
         self.controls['linear'] = button
         button.on_clicked(lambda event: self.set_linear())
+        # Linear-auto
+        row_pos += 1
+        ax = self.f.add_axes([row_pos * 0.12 + 0.1, 0.05, 0.11, 0.05])
+        button = Button(ax, 'Auto-lim')
+        self.controls['autolim'] = button
+        button.on_clicked(lambda event: self.set_auto_lim())
 
     def __attach_click_event__(self):
         """

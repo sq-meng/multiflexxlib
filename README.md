@@ -5,6 +5,7 @@ Tools library for inelastic neutron spectroscopy detector array MultiFLEXX.
 
 ## Required Environment
 `multiflexxlib` requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to make your life easier.
+> Support for MacOS is questionable at the moment due to peculiarities on how tkinter interacts with GUI routines of MacOS. The code should work though - and please report if it doesn't.  
 
 Alternately, Python2 > 2.7 is partially supported. Most of the code is written with Python 2 compatibility in mind, but might contain (additional) bugs.
 
@@ -21,11 +22,10 @@ run command `pip install multiflexxlib` from windows or linux command console.
 Data files for measurement of excitations in antiferromagnet MnF<sub>2</sub> can be found [here](https://github.com/sq-meng/multiflexxlib/tree/master/sampledata/MnF2). Please download the files into a folder.
 ## Usage
 ### Minimal Usage
-Download the file [run.py](https://github.com/yumemi5k/multiflexxlib/blob/master/run.py) and save  somewhere. Double-click on saved file and select the folder containing your MultiFLEXX scan files when asked for data folder. All possible 2D const-E plots will be shown.
+Download the file [run.py](https://github.com/yumemi5k/multiflexxlib/blob/master/run.py) and save  somewhere. Double-click on saved file and select the folder containing your MultiFLEXX scan files when asked for data folder. All possible 2D const-E plots will be shown. Double-click on a plot to open the plot in its own window.
 
-In case plot size becomes too small due to a large number of plots, double-click on a plot to open a new window dedicated to the plot, or refer to extended usage section on how to manually select data, or split data files into separate folders.
 ### Extended Usage
-Please also refer to docstrings of classes and functions, accessible through `help()` function, e.g. `help(mfl.UBMatrix)`.  
+Please also refer to docstrings of classes and functions, accessible through `help()` function, e.g. `help(mfl.UBMatrix)`.
 
 It is possible and recommended to use this package in an interactive Python interpreter such as `IPython` or a Matlab-esque Python development environment like `Spyder`, which both come with a default `Anaconda` installation.
 
@@ -79,7 +79,7 @@ It might be interesting to do a 1D-cut on 1st and 3rd plots, which is done as fo
 
 This does a cut through Voronoi partition of const-E data. Regions crossed by cut line are picked up and included in the cut. subset parameter can be omitted. `[1, 1, 1]` here is `[h, k, l]` values. `subset=[0, 2]` instead of `[1, 3]` because python index starts with `0`. This generates a cut from \[1, 1, 1\] to \[1.1, 1.1, 1\]. The `cut` method draws a line segment between specified cut start and end points, and each data point corresponding to crossed regions is subsequently projected onto cut axis.
 
-If you have enough data points, it makes more sense to do a traditional cut with rectangular bins:
+It makes more sense to do a traditional cut with rectangular bins if amount of data is sufficiently high:
 
 `c = p.cut_bins([1, 1, 1], [1.1, 1.1, 1], subset=[0, 2], no_points=21, ytol=[0, 0, 0.02])`
 
