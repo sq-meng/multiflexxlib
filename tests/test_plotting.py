@@ -1,5 +1,6 @@
 import multiflexxlib as mfl
 import os
+import pkg_resources
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))  # not zip safe, but acceptable for tests
 
 files = [os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058777'),

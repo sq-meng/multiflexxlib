@@ -1935,9 +1935,9 @@ def load(file_name=None):
     :return: BinnedData object.
     """
     # type: str -> BinnedData
-    root = tkinter.Tk()
-    root.withdraw()
     if file_name is None:
+        root = tkinter.Tk()
+        root.withdraw()
         file = filedialog.askopenfile(parent=root, defaultextension='.dmp', mode='rb',
                                       filetypes=(('multiflexxlib dump', '.dmp'),))
         root.destroy()
