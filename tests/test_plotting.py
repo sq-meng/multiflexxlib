@@ -8,5 +8,9 @@ files = [os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058777'),
 
 
 df = mfl.read_and_bin(files)
-df.plot([2, 3])
+p = df.plot([2, 3])
+p.set_lognorm()
+p.set_norm(None)
+p.auto_lim()
+
 df.cut_voronoi([-1, 0, -0.5], [-1, 0, -1], subset=[2, 3])

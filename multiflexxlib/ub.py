@@ -180,7 +180,7 @@ class UBMatrix(object):
         return find_spurion(q, ki, kf, self, spurion_type, in_system, out_system)
 
     def find_a3_a4(self, q, ki, kf, system='r', sense=1):
-        find_a3_a4(q, ki, kf, self, system, sense)
+        return find_a3_a4(q, ki, kf, self, system, sense)
 
     def convert(self, vectors, sys, axis=1):
         """
