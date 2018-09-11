@@ -1286,6 +1286,8 @@ class ConstECut(object):
             plotting.draw_line(ax_top, [self.start_r, self.end_r], self.data_object.ub_matrix)
             self.set_axes_labels(ax_bottom)
             ax_bottom.errorbar(cut.x, cut.y, yerr=cut.yerr, fmt='o')
+            # ax_bottom.ticklabel_format(style='sci', scilimits=(0, 0), axis='y')
+            # ax_bottom.get_yaxis().get_offset_text().set_position((-0.25, 0))
         f.tight_layout()
         return f, axes
 
@@ -1296,9 +1298,15 @@ class ConstECut(object):
         :return: None
         """
         ax.set_ylabel('Intensity (a.u.)')
-        start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
-        end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
+        # start_xlabel = '[' + ','.join(['%.2f' % x for x in self.start_r]) + ']'
+        # end_xlabel = '[' + ','.join(['%.2f' % x for x in self.end_r]) + ']'
+        start_xlabel = self._make_rlu_label(self.start_r)
+        end_xlabel = self._make_rlu_label(self.end_r)
         ax.set_xlabel('Relative position\n%s to %s\n(r.l.u.)' % (start_xlabel, end_xlabel))
+
+    @staticmethod
+    def _make_rlu_label(rlu):
+        return '[' + ','.join(['%.3g' % x for x in rlu]) + ']'
 
     def vstack(self, colorbar=False):
         energies = [self.data_object.data.loc[index, 'en'] for index in self.data_indices]
@@ -1328,7 +1336,7 @@ class ConstECut(object):
         ax.set_ylim(energies[0], energies[-1])
         self.set_axes_labels(ax)
         ax.set_ylabel('$\Delta$E (meV)')
-        self.put_parasite_axis(ax)
+        # self.put_parasite_axis(ax)
         return f, ax
 
     def __len__(self):
@@ -1343,10 +1351,13 @@ class ConstECut(object):
         return tuple(result)
 
     def put_parasite_axis(self, ax):
-        ax_p = ax.twiny()
-        fca = self._changing_indices()[0]
-        ax_p.set_xlim(self.start_r[fca], self.end_r[fca])
-        ax_p.set_xlabel(list('HKL')[fca] + ' (r.l.u.)')
+        # due to an apparent bug in when using sharex and parasite axes, the usage of parasite axes is removed.
+        # Direct HKL readout was added as an alternate way of finding out HKL values.
+        def format_coord(x, _):
+            hkl = self.start_r + x * (self.end_r - self.start_r)
+            return 'h={:.3g}, k={:.3g}, l={:.3g}'.format(hkl[0], hkl[1], hkl[2])
+
+        ax.format_coord = format_coord
 
     def re_bin(self, tolerance=0.01, subset=None):
         if subset is None:
