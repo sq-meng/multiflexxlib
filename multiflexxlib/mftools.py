@@ -1257,7 +1257,7 @@ class ConstECut(object):
             self.artists.append(artist)
         self.legend = ax.legend()
         self.set_axes_labels(ax)
-        self.put_parasite_axis(ax)
+        self.override_coord_formatter(ax)
         self.figure.tight_layout()
 
     def inspect(self, shade=True):
@@ -1278,7 +1278,7 @@ class ConstECut(object):
             draw_locus_outline(ax_top, locus_p)
             bins_collection = plotting.draw_patches(self.list_bin_polygons[i], mesh=True)
             ax_top.add_collection(bins_collection)
-            self.put_parasite_axis(ax_bottom)
+            self.override_coord_formatter(ax_bottom)
             # self.data_object.draw_voronoi_patch(ax_top, index=self.data_indices[i])
             if shade:
                 ax_top.scatter(x=points.px[indices], y=points.py[indices], c=points.permon[indices], zorder=10, s=12)
@@ -1336,7 +1336,7 @@ class ConstECut(object):
         ax.set_ylim(energies[0], energies[-1])
         self.set_axes_labels(ax)
         ax.set_ylabel('$\Delta$E (meV)')
-        # self.put_parasite_axis(ax)
+
         return f, ax
 
     def __len__(self):
@@ -1350,7 +1350,7 @@ class ConstECut(object):
         result = [n for n in range(3) if not np.isclose(delta[n], 0)]
         return tuple(result)
 
-    def put_parasite_axis(self, ax):
+    def override_coord_formatter(self, ax):
         # due to an apparent bug in when using sharex and parasite axes, the usage of parasite axes is removed.
         # Direct HKL readout was added as an alternate way of finding out HKL values.
         def format_coord(x, _):
