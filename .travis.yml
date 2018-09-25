@@ -4,4 +4,6 @@ python:
   - "3.5"
   - "3.6"
 # command to install dependencies
+install:
+  - python setup.py -q install
 script: python -m pytest
