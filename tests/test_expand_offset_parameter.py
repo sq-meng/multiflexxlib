@@ -3,7 +3,7 @@ import pytest
 
 
 def test1():
-    filename_list = ['test\\067777', 'test\\067778', '067780']
+    filename_list = ['test/067777', 'test/067778', '067780']
     a3_offset_value = 5.5
     a3_offset_list = [3.3, 2.2, 1.1]
     a3_offset_list_wrong = [3.2, 1.1]
