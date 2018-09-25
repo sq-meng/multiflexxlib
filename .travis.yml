@@ -5,6 +5,3 @@ python:
   - "3.6"
 # command to install dependencies
 script: python -m pytest
-branches:
-  only:
-    - master
