@@ -14,7 +14,7 @@ def etok(e_mev):
 
 def ktoe(k_inv_angstrom):
     """
-    Does the opposite or etok.
+    Does the opposite of etok.
     :param k_inv_angstrom: A-1.
     :return: meV.
     """
@@ -37,7 +37,7 @@ class UBMatrix(object):
         :param plot_x: x-axis of 2D-plots, [h, k, l]. Can be omitted if plot_x == hkl1 and plot_y == hkl2.
         :param plot_y: y-axis of 2D-plots, [h, k, l]. Can be omitted if plot_x == hkl1 and plot_y == hkl2.
         """
-        self._latparam = latparam
+        self._latparam = self._expand_latparam(latparam)
         self._hkl1 = hkl1
         self._hkl2 = hkl2
         if plot_x is None or plot_y is None:
@@ -88,6 +88,19 @@ class UBMatrix(object):
     @property
     def theta(self):
         return self._theta
+
+    @staticmethod
+    def _expand_latparam(params):
+        if type(params) == int or type(params) == float:
+            return [params, params, params, 90, 90, 90]
+        elif len(params) == 1:
+            return [params[0], params[0], params[0], 90, 90, 90]  # No I don't exploit conditional shortcuts.
+        elif len(params) == 3:
+            return[params[0], params[1],params[2], 90, 90, 90]
+        elif len(params) == 6:
+            return params
+        else:
+            raise ValueError('Invalid lattice parameters in UB-Matrix creation.')
 
     def update_conversion_matrices(self):
         self.conversion_matrices = dict()
@@ -270,12 +283,19 @@ def rotate_around_z(vectors, angles, axis=1):
 
 
 def guess_axes_labels(hkl1, hkl2):
+    """
+    Generates symbols like [H 0 0] [0 K 0] that is easier to the eye than x * [1, 0, 0], y * [0, 1, 0],
+    from hkl1 and hkl2 vectors.
+    :param hkl1: hkl1 in 3-element list or np.ndarray.
+    :param hkl2: hkl2 in 3-element list or np.ndarray.
+    :return: ()
+    """
     labels = ('H', 'K', 'L')
     hkl1_nonzero = [not np.isclose(x, 0) for x in hkl1]
     hkl2_nonzero = [not np.isclose(x, 0) for x in hkl2]
 
     if hkl1_nonzero.count(True) == 0 or hkl2_nonzero.count(True) == 0:
-        raise ValueError('guess axis labels: axes supplied are all zeroes.')
+        raise ValueError('guess axis labels: one or both axes supplied are all zeroes.')
     if hkl2_nonzero.count(True) == 1:  # axis with only one component gets precedence
         symbol_y = labels[hkl2_nonzero.index(True)]
         if labels[hkl1_nonzero.index(True)] != symbol_y:  # check if same symbol used twice
@@ -299,6 +319,14 @@ def guess_axes_labels(hkl1, hkl2):
 
 
 def make_label(hkl, symbol, return_list=False):
+    """
+    Generates friendly vector representation given a hkl vector and a symbol, e.g. [1, 0.5, 0] and 'H' gives
+    '[H 1/2H 0]'
+    :param hkl: 3-element iterable of numbers representation of hkl vector.
+    :param symbol: String with a single character.
+    :param return_list: Whether return a 3-element list of characters instead of a single string.
+    :return: A string or a list of 3 strings.
+    """
     hkl_fractions = [Fraction(x).limit_denominator(10) for x in hkl]
     use_absolute = [np.abs(x - y) > 0.01 for x, y in zip(hkl_fractions, hkl)]
     label_str_list = []
@@ -349,11 +377,11 @@ def angle_to_q(ki, kf, a3, a4, a3_add=0.0, a4_add=0.0, system='s', ub_matrix=Non
     :param kf: kf, in angstroms^-1
     :param a3: np.ndarray or list or float of A3 angles, in degrees
     :param a4: A4 angles, in degrees.
-    :param a3_add: value to be ADDED to A3, in degrees.
-    :param a4_add: value to be ADDED to A4, in degrees.
+    :param a3_add: value to be ADDED to A3, in degrees, float.
+    :param a4_add: value to be ADDED to A4, in degrees, float.
     :param system: Output system, ('s', 'r', 'p')
     :param ub_matrix: UBMatrix object, required if system is not 's'.
-    :return: q vectors in S system, 3xN array if input is in iterable form.
+    :return: q vectors in S system, 3xN array if input angles is iterable.
     """
     try:
         length = min(len(a3), len(a4))

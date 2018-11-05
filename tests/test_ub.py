@@ -2,8 +2,17 @@ import multiflexxlib as mfl
 import numpy as np
 
 
+def test_ub_creation():
+    u = mfl.UBMatrix(4, [1, 0, 0], [0, 1, 1])
+    assert np.all(u.latparam == np.array([4, 4, 4, 90, 90, 90]))
+    u = mfl.UBMatrix([4, 4.04, 4.9], [1, 0, 0], [0, 1, 0])
+    assert np.all(u.latparam == np.array([4, 4.04, 4.9, 90, 90, 90]))
+    u = mfl.UBMatrix([4, 4.04, 4.9, 90, 90, 120], [1, 0, 0], [0, 1, 0])
+    assert np.all(u.latparam == np.array([4, 4.04, 4.9, 90, 90, 120]))
+
+
 def test_ub_ortho():
-    u = mfl.UBMatrix([4.0, 4.0, 4.0, 90, 90, 90], [1, 0, 0], [0, 0, 1])
+    u = mfl.UBMatrix(4.0, [1, 0, 0], [0, 0, 1])
     assert u.is_orthogonal
     coords = np.array([[1, 1, 0],
                       [0, 1, 0],

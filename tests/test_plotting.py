@@ -8,9 +8,17 @@ files = [os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058777'),
 
 
 df = mfl.read_and_bin(files)
-p = df.plot([2, 3])
-p.set_lognorm()
-p.set_norm(None)
-p.auto_lim()
 
-df.cut_voronoi([-1, 0, -0.5], [-1, 0, -1], subset=[2, 3])
+
+def test_plot():
+    p = df.plot([2, 3])
+    p.set_lognorm()
+    p.set_norm(None)
+    p.auto_lim()
+
+
+def test_cut():
+    c = df.cut_voronoi([-1, 0, -0.5], [-1, 0, -1], subset=[2, 3])
+    c2 = df.cut_bins([-1, 0, -0.5], [-1, 0, -1], subset=[2, 3], no_points=21)
+    c.inspect()
+    c2.inspect()
