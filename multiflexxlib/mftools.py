@@ -1909,7 +1909,7 @@ def _binning_1d_cut(start, end, points, tol_transverse=None, tol_lateral=None):
         if next_bin > 1:
             break
     xcut = pd.cut(points_scaled.x, xbins)
-    return xcut, ycut
+    return [xcut, ycut]
 
 
 def calculate_locus(ki, kf, a3_start, a3_end, a4_start, a4_end, ub_matrix, expand_a3=False):
