@@ -153,8 +153,8 @@ def projection_on_segment(points, segment, aspect=1):
     :param aspect: ONLY WORKS IF D=2, >1 means unit length of y axis is greater.
     :return: 1-D array of percentiles
     """
-    points = np.array(points)
-    segment = np.array(segment)
+    points = np.asarray(points)
+    segment = np.asarray(segment)
     if len(points.shape) == 1:
         shape = points.shape[0]
         points = points.reshape(-1, shape)

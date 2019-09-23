@@ -68,6 +68,7 @@ try:
 except IOError:
     print('Intensity correction matrix not found - assuming all ones.')
     INTENSITY_COEFFICIENT = np.ones(NUM_CHANNELS)
+# TODO: do something with this abomination
 INTENSITY_COEFFICIENT = INTENSITY_COEFFICIENT / NORM_FACTOR
 
 
@@ -569,7 +570,7 @@ def bin_and_cut(data, tolerance=0.2, strategy=BIN_ADAPTIVE, detect_diffuse=True)
     :param tolerance: Binning tolerance.
     :param strategy: 'adaptive', 'regular' or a list describing bin edges.
     :param detect_diffuse: Detect of the values are semi-continuous and cannot be cut into bins using adaptive mode.
-    :return: pd.cut results.
+    :return: pd.cut
     """
     bin_edges = make_bin_edges(data, tolerance, strategy=strategy, detect_diffuse=detect_diffuse)
     cut = pd.cut(data, bin_edges)
@@ -597,7 +598,7 @@ def bin_scans(list_of_data,  # type: ['Scan']
     Bin raw Scan objects into BinnedData object.
     :param list_of_data: a list of Scan objects.
     :param nan_fill: how to deal NaNs in metadata such as temperature. Default is fill 0.
-    :param ignore_ef: Not implemented.
+    :param ignore_ef: Not implemented, default is False.
     :param en_tolerance: Energy binning tolerance.
     :param tt_tolerance: Temperature binning tolerance.
     :param mag_tolerance: Magnetic field binning tolerance.
@@ -719,7 +720,7 @@ def _expand_offset_parameter(param, filename_list):
                 offset_list.append(0.0)
         return offset_list
     else:
-        raise TypeError('Offset should be None, a number, a list or a dict.')
+        raise TypeError('Offset should be either None, a number, a list or a dict.')
 
 
 def read_and_bin(filename_list=None, ub_matrix=None, intensity_matrix=None, processes=1,
@@ -991,14 +992,20 @@ class BinnedData(object):
             cut_object.plot(precision=label_precision, labels=labels)
         return cut_object
 
-    def dispersion(self, start, end, no_points=21, colorbar=False):
+    def dispersion(self, start, end, no_points=21, en_tolerance=0.02, colorbar=False):
+        """
+        Generates a dispersion relation plot by stacking a series of const-E cuts.
+        (y-axis: dE, x-axis: q-cut, color: counts).
+        :param start: Starting q point of const-E cut.
+        :param end: Ending point of cut.
+        :param no_points: number of points to use in cut, default = 21.
+        :param en_tolerance: energy transfer tolerance for binning, default = 0.02meV
+        :param colorbar: Whether to place a colorbar on graph.
+        :return: figure and axes objects of generated matplotlib graph.
+        """
         energies = self.data.en
-        en_cuts = bin_and_cut(energies, tolerance=0.05)
-        multiindex = self.data.groupby(en_cuts)['ef'].nsmallest(1).index
-        try:
-            indices = [ind[1] for ind in multiindex]
-        except TypeError:
-            indices = multiindex
+        en_cuts = bin_and_cut(energies, tolerance=en_tolerance)
+        indices = self.data.groupby(en_cuts)['ef'].idxmin()
         c = self.cut_bins(start=start, end=end, subset=indices, no_points=no_points, plot=False)
         return c.vstack(colorbar)
 
