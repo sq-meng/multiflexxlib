@@ -15,3 +15,6 @@
 
 # stuff only used for paper
 /paper/
+
+#build
+/build/
