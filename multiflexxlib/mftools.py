@@ -8,7 +8,10 @@ import numpy as np
 from scipy import interpolate
 from pylab import flipud
 import pandas as pd
-from pandas.core.categorical import Categorical
+try:
+    from pandas import Categorical
+except ImportError:
+    from pandas.core.categorical import Categorical
 import re
 from collections import defaultdict
 from multiflexxlib import plotting
