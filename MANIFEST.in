@@ -1,2 +1,2 @@
-include multiflexxlib/res *
+recursive-include multiflexxlib/res *
 recursive-include sampledata *
