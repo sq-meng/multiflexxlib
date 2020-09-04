@@ -23,7 +23,7 @@ import matplotlib.patches as mpl_patches
 import matplotlib.path as mpl_path
 from matplotlib.collections import PatchCollection
 from matplotlib.colors import LogNorm
-from matplotlib.widgets import Button, TextBox
+from matplotlib.widgets import Button
 from mpl_toolkits.axisartist import Subplot
 from mpl_toolkits.axisartist.grid_helper_curvelinear import GridHelperCurveLinear
 import pickle
@@ -659,7 +659,7 @@ def bin_scans(list_of_data,  # type: ['Scan']
 
 
 def read_mf_scan(filename, ub_matrix=None, intensity_matrix=None, a3_offset=0.0, a4_offset=0.0):
-    # type: (str, UBMatrix, np.ndarray) -> Scan
+    # type: (str, UBMatrix, np.ndarray, float ,float) -> Scan
     """
     Reads TASMAD scan files.
     :param filename: TASMAD file name to read.
@@ -1963,7 +1963,7 @@ def load(file_name=None):
     :param file_name: Which file to load.
     :return: BinnedData object.
     """
-    # type: str -> BinnedData
+    # type:
     if file_name is None:
         root = tkinter.Tk()
         root.withdraw()

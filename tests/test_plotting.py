@@ -4,7 +4,9 @@ import pkg_resources
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))  # not zip safe, but acceptable for tests
 
 files = [os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058777'),
-         os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058778')]
+         os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058778'),
+         os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058779'),
+         os.path.join(THIS_DIR, os.pardir, 'sampledata/MnF2/058780')]
 
 
 df = mfl.read_and_bin(files)
