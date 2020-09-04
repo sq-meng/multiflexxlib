@@ -53,6 +53,7 @@ NUM_CHANNELS = 31
 EF_LIST = [2.5, 3.0, 3.5, 4.0, 4.5]
 CHANNEL_SEPARATION = 2.5
 NORM_FACTOR = [1.0, 1.16, 1.23, 1.30, 1.27]
+# Apeture angle correction
 
 try:
     DETECTOR_WORKING = np.loadtxt(pkg_resources.resource_filename(__name__, 'res/alive.csv'))
@@ -70,7 +71,8 @@ try:
     INTENSITY_COEFFICIENT = np.loadtxt(pkg_resources.resource_filename(__name__, 'res/int_corr.csv'), delimiter=',')
 except IOError:
     print('Intensity correction matrix not found - assuming all ones.')
-    INTENSITY_COEFFICIENT = np.ones(NUM_CHANNELS)
+    INTENSITY_COEFFICIENT = np.ones([NUM_CHANNELS, len(EF_LIST)])
+
 # TODO: do something with this abomination
 INTENSITY_COEFFICIENT = INTENSITY_COEFFICIENT / NORM_FACTOR
 
@@ -532,8 +534,8 @@ def _merge_scan_points(data_frames, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=
 def _decoupled_angle_merge(joined_frames, a3_cuts, a4_cuts):
     # helper function for merging scan points. Used if A3 and A4 angles can be binned independently.
     group = joined_frames.groupby([a3_cuts, a4_cuts])
-    sums = group['counts', 'counts_norm', 'MON'].sum()
-    means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
+    sums = group[['counts', 'counts_norm', 'MON']].sum()
+    means = group[['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l']].mean()
     error_bars = np.sqrt(sums.counts)
     per_monitor = sums.counts_norm / sums.MON
     result = pd.concat([sums, means], axis=1)
@@ -553,8 +555,8 @@ def _coupled_angle_merge(joined_frames, a3_tolerance, a3_bins, a4_tolerance, a4_
         filtered = joined_frames.loc[joined_frames.A3.between(a3_left, a3_right)]
         a4_cuts = bin_and_cut(filtered.A4, tolerance=a4_tolerance, strategy=a4_bins)
         group = filtered.groupby([a4_cuts])
-        sums = group['counts', 'counts_norm', 'MON'].sum()
-        means = group['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l'].mean()
+        sums = group[['counts', 'counts_norm', 'MON']].sum()
+        means = group[['A3', 'A4', 'px', 'py', 'pz', 'h', 'k', 'l']].mean()
         error_bars = np.sqrt(sums.counts)
         per_monitor = sums.counts_norm / sums.MON
         fragment = pd.concat([sums, means], axis=1)
@@ -586,7 +588,7 @@ def series_to_binder(items):
     :param items: Anything that makes sense with list(items).
     :return:
     """
-    # type: (pd.Series) -> _DataBinder
+    # type: (pd.Series)->_DataBinder
     return _DataBinder(list(items))
 
 
@@ -618,16 +620,16 @@ def bin_scans(list_of_data,  # type: ['Scan']
     """
     all_data = pd.DataFrame(index=range(len(list_of_data) * len(EF_LIST)),
                             columns=['name', 'ei', 'ef', 'en', 'tt', 'mag', 'points', 'locus_a', 'locus_p'],
-                            dtype=object)
+                            dtype=np.object)
     file_names = [data.file_name for data in list_of_data]
     for i, scan in enumerate(list_of_data):
         for j in range(len(EF_LIST)):
             ef = EF_LIST[j]
             all_data.loc[i * len(EF_LIST) + j, ['name', 'ei', 'ef', 'en']] = [scan.file_name, scan.ei, ef, scan.ei - ef]
             all_data.loc[i * len(EF_LIST) + j, ['tt', 'mag']] = [scan.tt, scan.mag]
-            all_data.loc[i * len(EF_LIST) + j, ['points', 'locus_a', 'locus_p']] = [scan.converted_dataframes[j],
-                                                                                    scan.actual_locus_list[j],
-                                                                                    scan.planned_locus_list[j]]
+            all_data.loc[i * len(EF_LIST) + j]['points'] = scan.converted_dataframes[j]
+            all_data.loc[i * len(EF_LIST) + j]['locus_a'] = scan.actual_locus_list[j]
+            all_data.loc[i * len(EF_LIST) + j]['locus_p'] = scan.planned_locus_list[j]
 
     all_data = all_data.fillna(nan_fill)
     cut_ei = bin_and_cut(all_data.ei, en_tolerance, strategy=en_bins)
@@ -639,13 +641,17 @@ def bin_scans(list_of_data,  # type: ['Scan']
         raise NotImplementedError('For the love of god do not try to mix data from different final energies!')
     else:
         grouped = all_data.groupby([cut_ei, cut_en, cut_tt, cut_mag])
-    grouped_meta = grouped['ei', 'ef', 'en', 'tt', 'mag'].mean()
-    grouped_data = grouped['points'].apply(series_to_binder).apply(lambda x:
-                                                                   _MergedDataPoints(x, a3_tolerance, a4_tolerance,
-                                                                                     a3_bins, a4_bins))
+    grouped_meta = grouped[['ei', 'ef', 'en', 'tt', 'mag']].mean()
 
-    grouped_locus_a = grouped['locus_a'].apply(series_to_binder).apply(_MergedLocus)
-    grouped_locus_p = grouped['locus_p'].apply(series_to_binder).apply(_MergedLocus)
+    grouped_data = grouped['points'].\
+        apply(series_to_binder).\
+        apply(lambda x: _MergedDataPoints(x, a3_tolerance, a4_tolerance, a3_bins, a4_bins) if np.all(pd.notna(x)) else np.NaN)
+
+    grouped_locus_a = grouped['locus_a'].\
+        apply(series_to_binder).apply(lambda x: _MergedLocus(x) if np.all(pd.notna(x)) else np.NaN)
+
+    grouped_locus_p = grouped['locus_p'].\
+        apply(series_to_binder).apply(lambda x: _MergedLocus(x) if np.all(pd.notna(x)) else np.NaN)
     joined = pd.concat([grouped_meta, grouped_data, grouped_locus_a, grouped_locus_p], axis=1)
     index_reset = joined.dropna().reset_index(drop=True)
     return BinnedData(index_reset, file_names=file_names, ub_matrix=list_of_data[0].ub_matrix,
@@ -810,9 +816,11 @@ class _MergedDataPoints(pd.DataFrame):
     # Helper class to override __str__ behaviour.
     def __init__(self, items, a3_tolerance=0.2, a4_tolerance=0.2, a3_bins=BIN_ADAPTIVE, a4_bins=BIN_ADAPTIVE):
         # type: (_DataBinder, float) -> None
+
         binned_points = _merge_scan_points(items, a3_tolerance=a3_tolerance, a4_tolerance=a4_tolerance,
-                                           a3_bins=a3_bins, a4_bins=a4_bins)
+                                       a3_bins=a3_bins, a4_bins=a4_bins)
         super(_MergedDataPoints, self).__init__(binned_points)
+
 
     def __str__(self):
         return '%d pts' % len(self)
