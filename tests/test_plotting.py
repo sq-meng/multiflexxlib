@@ -20,7 +20,7 @@ def test_plot():
 
 
 def test_cut():
-    c = df.cut_voronoi([-1, 0, -0.5], [-1, 0, -1], subset=[2, 3])
-    c2 = df.cut_bins([-1, 0, -0.5], [-1, 0, -1], subset=[2, 3], no_points=21)
+    c = df.cut_voronoi([1, 0, -0.4], [1, 0, 0.4], subset=[2, 3])
+    c2 = df.cut_bins([1, 0, -0.4], [1, 0, 0.4], subset=[2, 3], no_points=21)
     c.inspect()
     c2.inspect()

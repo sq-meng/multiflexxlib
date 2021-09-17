@@ -129,7 +129,7 @@ def side_of_point(point, segment):
 def segment_intersect_polygons(segment, list_of_polygons):
     # TODO: make this faster.
     segment = np.array(segment)
-    list_of_polygons = np.array(list_of_polygons)
+    # list_of_polygons = np.array(list_of_polygons)
     results = []
     for polygon in list_of_polygons:
         this_polygon = False

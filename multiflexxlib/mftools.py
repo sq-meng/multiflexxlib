@@ -503,7 +503,7 @@ def _merge_locus(locus_list):
     for locus in locus_list:
         clipper.AddPath(pyclipper.scale_to_clipper(locus), pyclipper.PT_SUBJECT)
 
-    merged_locus = np.asarray(pyclipper.scale_from_clipper(clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO)))
+    merged_locus = pyclipper.scale_from_clipper(clipper.Execute(pyclipper.CT_UNION, pyclipper.PFT_NONZERO))
     return merged_locus
 
 
@@ -645,13 +645,13 @@ def bin_scans(list_of_data,  # type: ['Scan']
 
     grouped_data = grouped['points'].\
         apply(series_to_binder).\
-        apply(lambda x: _MergedDataPoints(x, a3_tolerance, a4_tolerance, a3_bins, a4_bins) if np.all(pd.notna(x)) else np.NaN)
+        apply(lambda x: _MergedDataPoints(x, a3_tolerance, a4_tolerance, a3_bins, a4_bins) if np.any(pd.notna(x)) else np.NaN)
 
     grouped_locus_a = grouped['locus_a'].\
-        apply(series_to_binder).apply(lambda x: _MergedLocus(x) if np.all(pd.notna(x)) else np.NaN)
+        apply(series_to_binder).apply(lambda x: _MergedLocus(x) if np.any(pd.notna(x)) else np.NaN)
 
     grouped_locus_p = grouped['locus_p'].\
-        apply(series_to_binder).apply(lambda x: _MergedLocus(x) if np.all(pd.notna(x)) else np.NaN)
+        apply(series_to_binder).apply(lambda x: _MergedLocus(x) if np.any(pd.notna(x)) else np.NaN)
     joined = pd.concat([grouped_meta, grouped_data, grouped_locus_a, grouped_locus_p], axis=1)
     index_reset = joined.dropna().reset_index(drop=True)
     return BinnedData(index_reset, file_names=file_names, ub_matrix=list_of_data[0].ub_matrix,
@@ -986,7 +986,7 @@ class BinnedData(object):
             monitor = group['MON'].sum().dropna()
             counts_permon = counts_norm / monitor
             yerr = counts_permon * yerr_scale
-            coords_p = group['px', 'py', 'pz'].mean().dropna()
+            coords_p = group[['px', 'py', 'pz']].mean().dropna()
             coords_s = self.ub_matrix.convert(coords_p, 'ps', axis=0)
             projections = plotting.projection_on_segment(coords_s, np.vstack((start_s, end_s)))
             cut_result = pd.DataFrame({'x': projections, 'y': counts_permon, 'yerr': yerr})\
