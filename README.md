@@ -1,7 +1,13 @@
 # multiflexxlib
 Tools library for inelastic neutron spectroscopy array analyzer MultiFLEXX.
+## Known issues
+### Freezing on spyder `df.plot()` call
+Type `%matplotlib qt` in console bevore importing multiflexxlib.
+### General bugginess
+The code is being worked on to keep up with changes in its dependencies. Please open an issue or drop me an email if something is off.
+
 ## Introduction
-`multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data acquired with cold neutron array detector MultiFLEXX. A detailed description on the detector can be found on the [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html).
+`multiflexxlib` is a Python package for visualization and treatment of neuron spectroscopy data acquired with cold neutron array detector MultiFLEXX. ~~A detailed description on the detector can be found on the [HZB website](https://www.helmholtz-berlin.de/forschung/oe/em/transport-phenomena/em-amct-instruments/flex/multiflexx_en.html).~~
 
 ## Required Environment
 `multiflexxlib` requires python3 version > 3.5. For installation of Python environment under Windows it is recommended to install a scientific Python package such as [Anaconda](https://www.anaconda.com/download/) to make your life easier.
