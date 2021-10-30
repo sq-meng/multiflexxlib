@@ -881,7 +881,7 @@ class BinnedData(object):
                 points = self.data.loc[ind, 'points']
                 angle_to_q = self.ub_matrix.angle_to_q
                 lop_angle = plotting.voronoi_polygons(points['A3'], points['A4'],
-                                                      self.ub_matrix.figure_aspect, max_cell=2.5)
+                                                      self.ub_matrix.figure_aspect, max_cell=5)
                 lop_p = [angle_to_q(etok(self.data.ei[ind]), etok(self.data.ef[ind]),
                                     poly[:, 0], poly[:, 1], system='p') for poly in lop_angle]
                 lop_p_filtered = [poly.T[:, 0:2] for poly in lop_p]
